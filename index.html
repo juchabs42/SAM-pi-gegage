@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="SAM Piégeage — suivi partagé des captures de ravageurs par parcelle.">
+  <meta name="theme-color" content="#D31145">
+  <title>SAM Piégeage — SudExpé</title>
+  <link rel="icon" type="image/png" href="favicon.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <img src="logo-sudexpe.png" alt="SudExpé" class="brand-logo">
+      <div class="brand-text">
+        <p>Sud Agro Météo</p>
+        <h1>SAM Piégeage</h1>
+      </div>
+    </div>
+
+    <div class="user-zone">
+      <span id="userEmail" class="user-email"></span>
+      <button id="manageParcelsButton" class="header-button" type="button" hidden>Parcelles</button>
+      <button id="signOutButton" class="header-button icon-button" type="button" aria-label="Se déconnecter" title="Se déconnecter" hidden>↪</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="setupState" class="auth-shell" hidden>
+      <article class="auth-card">
+        <img src="logo-sudexpe.png" alt="SudExpé" class="auth-logo">
+        <p class="eyebrow">Configuration</p>
+        <h2>Relier SAM Piégeage à Supabase</h2>
+        <p>La page est prête, mais l’URL du projet Supabase et la clé <code>anon</code> doivent être renseignées dans <code>config.js</code>.</p>
+        <p class="small-note">Le fichier <code>supabase_schema.sql</code> crée les tables et les règles de sécurité nécessaires.</p>
+      </article>
+    </section>
+
+    <section id="authState" class="auth-shell" hidden>
+      <article class="auth-card">
+        <img src="logo-sudexpe.png" alt="SudExpé" class="auth-logo">
+        <p class="eyebrow">Accès partagé</p>
+        <h2>Connexion à SAM Piégeage</h2>
+        <p class="auth-intro">Chaque utilisateur se connecte avec son compte. Les parcelles et les relevés sont enregistrés dans Supabase et restent disponibles à tous les utilisateurs autorisés.</p>
+
+        <form id="authForm" class="stack-form">
+          <label>
+            Adresse e-mail
+            <input id="authEmail" type="email" autocomplete="email" required>
+          </label>
+          <label>
+            Mot de passe
+            <input id="authPassword" type="password" autocomplete="current-password" minlength="6" required>
+          </label>
+          <div class="auth-actions">
+            <button class="primary-button" type="submit">Se connecter</button>
+            <button id="signUpButton" class="secondary-button" type="button">Créer un compte</button>
+          </div>
+        </form>
+        <div id="authMessage" class="form-message" role="status"></div>
+      </article>
+    </section>
+
+    <section id="appState" hidden>
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Réseau de piégeage SudExpé</p>
+          <h2>Suivi des piégeages ravageurs</h2>
+          <p>Suivez les captures enregistrées dans les parcelles et conservez l’historique de la saison dans une base partagée.</p>
+        </div>
+        <button id="addParcelButton" class="primary-button compact" type="button">+ Créer une parcelle</button>
+      </div>
+
+      <div id="globalMessage" class="global-message" role="status"></div>
+
+      <section class="controls" aria-label="Filtres">
+        <label>
+          Ravageur
+          <select id="pestSelect">
+            <option value="carpocapse">Carpocapse</option>
+            <option value="punaise_diabolique">Punaise diabolique</option>
+            <option value="cicadelle">Cicadelle</option>
+            <option value="mouche_mediterraneenne">Mouche méditerranéenne</option>
+            <option value="tordeuse">Tordeuse</option>
+          </select>
+        </label>
+
+        <label>
+          Année
+          <select id="yearSelect"></select>
+        </label>
+
+        <label>
+          Exploitation
+          <select id="farmSelect"></select>
+        </label>
+
+        <label>
+          Parcelle
+          <select id="parcelSelect"></select>
+        </label>
+
+        <label>
+          Calcul
+          <select id="calculationSelect">
+            <option value="average">Moyenne des captures</option>
+            <option value="total">Total des captures</option>
+          </select>
+        </label>
+
+        <label>
+          Affichage
+          <select id="displaySelect">
+            <option value="records">Captures par relevé</option>
+            <option value="cumulative">Cumul saisonnier</option>
+          </select>
+        </label>
+
+        <button id="exportCsvButton" class="secondary-button control-button" type="button">Exporter CSV</button>
+      </section>
+
+      <div class="metric-grid">
+        <article class="metric-card">
+          <p>Dernier relevé</p>
+          <strong id="lastValue">—</strong>
+          <span id="lastDate">Aucune donnée</span>
+        </article>
+        <article class="metric-card">
+          <p>Tendance</p>
+          <strong id="trendValue">—</strong>
+          <span>Comparaison avec les relevés précédents</span>
+        </article>
+        <article class="metric-card">
+          <p>Cumul saisonnier</p>
+          <strong id="seasonTotal">—</strong>
+          <span id="seasonUnit">captures</span>
+        </article>
+        <article class="metric-card">
+          <p>Nombre de relevés</p>
+          <strong id="recordCount">0</strong>
+          <span id="lastUpdate">Aucune mise à jour</span>
+        </article>
+      </div>
+
+      <article class="panel">
+        <div class="panel-header">
+          <div>
+            <p class="panel-kicker">Dynamique saisonnière</p>
+            <h3 id="chartTitle">Captures par relevé</h3>
+          </div>
+        </div>
+        <div id="chartEmpty" class="empty-state">Créez une parcelle puis ajoutez un premier relevé.</div>
+        <div class="chart-wrap large">
+          <canvas id="trapChart" aria-label="Graphique des captures de ravageurs"></canvas>
+        </div>
+      </article>
+
+      <div class="two-columns">
+        <article class="panel">
+          <div class="panel-header">
+            <div>
+              <p class="panel-kicker">Historique</p>
+              <h3>Relevés enregistrés</h3>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Captures</th>
+                  <th>Enregistré le</th>
+                </tr>
+              </thead>
+              <tbody id="historyBody"></tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="panel entry-panel">
+          <div class="panel-header">
+            <div>
+              <p class="panel-kicker">Comparaison parcelle</p>
+              <h3>Ajouter un relevé</h3>
+            </div>
+          </div>
+
+          <div id="selectedParcelSummary" class="selected-parcel"></div>
+
+          <form id="observationForm" class="stack-form">
+            <label>
+              Date du relevé
+              <input id="observationDate" type="date" required>
+            </label>
+            <label>
+              Nombre de captures
+              <input id="observationCount" type="number" min="0" step="1" inputmode="numeric" required>
+            </label>
+            <button class="primary-button" type="submit">Enregistrer le relevé</button>
+          </form>
+          <div id="observationMessage" class="form-message" role="status"></div>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="parcelDialog" class="parcel-dialog">
+    <div class="dialog-header">
+      <div>
+        <p class="panel-kicker">Parcelles</p>
+        <h2>Créer et consulter les parcelles</h2>
+      </div>
+      <button id="closeParcelDialog" class="close-button" type="button" aria-label="Fermer">×</button>
+    </div>
+
+    <form id="parcelForm" class="parcel-form">
+      <label>
+        Exploitation
+        <input id="parcelFarm" type="text" maxlength="100" required>
+      </label>
+      <label>
+        Parcelle
+        <input id="parcelName" type="text" maxlength="100" required>
+      </label>
+      <label>
+        Variété
+        <input id="parcelVariety" type="text" maxlength="100" required>
+      </label>
+      <label>
+        Surface (ha)
+        <input id="parcelArea" type="number" min="0" step="0.01" required>
+      </label>
+      <button class="primary-button" type="submit">Créer la parcelle</button>
+    </form>
+    <div id="parcelMessage" class="form-message" role="status"></div>
+
+    <div class="parcel-list-wrap">
+      <h3>Parcelles disponibles</h3>
+      <div id="parcelList" class="parcel-list"></div>
+    </div>
+  </dialog>
+
+  <footer>
+    <p>SAM Piégeage — SudExpé</p>
+    <p>Outil de suivi des captures de ravageurs.</p>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
