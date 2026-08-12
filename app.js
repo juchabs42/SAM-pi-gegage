@@ -153,11 +153,11 @@ async function loadAllData() {
   setMessage(el("globalMessage"), "Chargement des données…");
 
   const [parcelResult, observationResult] = await Promise.all([
-    db.from("parcels")
+    db.from("piegeage_parcels")
       .select("id, exploitation, name, variety, area_ha, created_by, created_at")
       .order("exploitation", { ascending: true })
       .order("name", { ascending: true }),
-    db.from("trap_observations")
+    db.from("piegeage_observations")
       .select("id, parcel_id, pest, observed_on, captures, created_by, created_at")
       .order("observed_on", { ascending: true })
       .order("created_at", { ascending: true })
