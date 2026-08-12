@@ -5,6 +5,6 @@
 // Ne jamais mettre la clé "service_role" dans ce fichier.
 
 window.SAM_CONFIG = {
-  SUPABASE_URL: "https://VOTRE-PROJET.supabase.co",
-  SUPABASE_ANON_KEY: "VOTRE_CLE_ANON"
+  SUPABASE_URL: "https://qdzbxpjlbaazdymthefm.supabase.co",
+  SUPABASE_ANON_KEY: "sb_publishable_5jK2FVA9utM5HiHFGnzgmA_F3TevQex"
 };
