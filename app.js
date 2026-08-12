@@ -517,7 +517,7 @@ async function saveObservation(event) {
   };
 
   const { data, error } = await db
-    .from("trap_observations")
+    .from("piegeage_observations")
     .insert(payload)
     .select("id, parcel_id, pest, observed_on, captures, created_by, created_at")
     .single();
@@ -563,7 +563,7 @@ async function saveParcel(event) {
   };
 
   const { data, error } = await db
-    .from("parcels")
+    .from("piegeage_parcels")
     .insert(payload)
     .select("id, exploitation, name, variety, area_ha, created_by, created_at")
     .single();
