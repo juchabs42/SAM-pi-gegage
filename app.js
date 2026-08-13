@@ -6,30 +6,19 @@ const PESTS = {
   tordeuse: "Tordeuse"
 };
 
-const SAM_COLOR = "#D31145";
-const SAM_COLOR_SOFT = "rgba(211, 17, 69, 0.10)";
+const COLORS = ["#D31145", "#31688E", "#2E8B57", "#A56A00", "#744F9C", "#008C95", "#B04A3A", "#58636D"];
 
-let db = null;
+let db;
 let currentUser = null;
 let parcels = [];
 let observations = [];
-let trapChart = null;
+let chart = null;
 
-const el = (id) => document.getElementById(id);
+const $ = (id) => document.getElementById(id);
 
-function configIsReady() {
-  const cfg = window.SAM_CONFIG || {};
-  return Boolean(
-    cfg.SUPABASE_URL &&
-    cfg.SUPABASE_ANON_KEY &&
-    !cfg.SUPABASE_URL.includes("VOTRE-PROJET") &&
-    !cfg.SUPABASE_ANON_KEY.includes("VOTRE_CLE")
-  );
-}
-
-function setMessage(target, message = "", isError = false) {
-  target.textContent = message;
-  target.classList.toggle("error", isError);
+function setMessage(element, message = "", error = false) {
+  element.textContent = message;
+  element.classList.toggle("error", error);
 }
 
 function formatDate(iso) {
@@ -39,36 +28,21 @@ function formatDate(iso) {
 
 function formatDateTime(iso) {
   if (!iso) return "—";
-  return new Date(iso).toLocaleString("fr-FR", {
-    dateStyle: "short",
-    timeStyle: "short"
-  });
+  return new Date(iso).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" });
 }
 
 function formatNumber(value, digits = 1) {
-  return new Intl.NumberFormat("fr-FR", {
-    maximumFractionDigits: digits
-  }).format(value);
+  return new Intl.NumberFormat("fr-FR", { maximumFractionDigits: digits }).format(value);
 }
 
-function escapeCsv(value) {
-  return `"${String(value ?? "").replaceAll('"', '""')}"`;
+function configReady() {
+  const c = window.SAM_CONFIG || {};
+  return Boolean(c.SUPABASE_URL && c.SUPABASE_ANON_KEY);
 }
 
-function showState(state) {
-  el("setupState").hidden = state !== "setup";
-  el("authState").hidden = state !== "auth";
-  el("appState").hidden = state !== "app";
-
-  const connected = state === "app";
-  el("signOutButton").hidden = !connected;
-  el("manageParcelsButton").hidden = !connected;
-  el("userEmail").textContent = connected ? (currentUser?.email || "") : "";
-}
-
-async function bootstrap() {
-  if (!configIsReady()) {
-    showState("setup");
+async function init() {
+  if (!configReady()) {
+    setMessage($("globalMessage"), "Configuration Supabase absente dans config.js.", true);
     return;
   }
 
@@ -79,579 +53,510 @@ async function bootstrap() {
 
   const { data: { session } } = await db.auth.getSession();
   currentUser = session?.user || null;
+  renderAuth();
 
-  db.auth.onAuthStateChange(async (_event, session) => {
+  db.auth.onAuthStateChange((_event, session) => {
     currentUser = session?.user || null;
-    if (currentUser) {
-      showState("app");
-      await loadAllData();
-    } else {
-      showState("auth");
-      resetAppData();
-    }
+    renderAuth();
   });
 
-  if (currentUser) {
-    showState("app");
-    await loadAllData();
-  } else {
-    showState("auth");
+  await loadData();
+}
+
+function renderAuth() {
+  const connected = Boolean(currentUser);
+  $("loggedOutBox").hidden = connected;
+  $("loggedInBox").hidden = !connected;
+  $("editActions").hidden = !connected;
+  $("userEmail").textContent = currentUser?.email || "";
+  if (!connected) {
+    $("authPassword").value = "";
   }
 }
 
-function resetAppData() {
-  parcels = [];
-  observations = [];
-  if (trapChart) {
-    trapChart.destroy();
-    trapChart = null;
+async function login() {
+  const email = $("authEmail").value.trim();
+  const password = $("authPassword").value;
+  setMessage($("authMessage"));
+
+  if (!email || !password) {
+    setMessage($("authMessage"), "Renseignez l’adresse mail et le mot de passe.", true);
+    return;
   }
-}
 
-async function signIn(event) {
-  event.preventDefault();
-  setMessage(el("authMessage"));
-
-  const email = el("authEmail").value.trim();
-  const password = el("authPassword").value;
-
+  $("loginButton").disabled = true;
   const { error } = await db.auth.signInWithPassword({ email, password });
+  $("loginButton").disabled = false;
+
   if (error) {
-    setMessage(el("authMessage"), `Connexion impossible : ${error.message}`, true);
-  }
-}
-
-async function signUp() {
-  setMessage(el("authMessage"));
-
-  const email = el("authEmail").value.trim();
-  const password = el("authPassword").value;
-
-  if (!email || password.length < 6) {
-    setMessage(el("authMessage"), "Renseignez un e-mail et un mot de passe d’au moins 6 caractères.", true);
+    setMessage($("authMessage"), "Connexion impossible. Vérifiez l’adresse mail et le mot de passe.", true);
     return;
   }
 
-  const { data, error } = await db.auth.signUp({ email, password });
-  if (error) {
-    setMessage(el("authMessage"), `Création impossible : ${error.message}`, true);
-    return;
-  }
-
-  if (data.session) {
-    setMessage(el("authMessage"), "Compte créé.");
-  } else {
-    setMessage(el("authMessage"), "Compte créé. Validez l’e-mail de confirmation avant de vous connecter.");
-  }
+  setMessage($("authMessage"));
+  $("authEmail").value = "";
+  $("authPassword").value = "";
 }
 
-async function signOut() {
+async function logout() {
   await db.auth.signOut();
 }
 
-async function loadAllData() {
-  setMessage(el("globalMessage"), "Chargement des données…");
+async function loadData() {
+  setMessage($("globalMessage"), "Chargement…");
 
-  const [parcelResult, observationResult] = await Promise.all([
+  const [p, o] = await Promise.all([
     db.from("piegeage_parcels")
       .select("id, exploitation, name, variety, area_ha, created_by, created_at")
-      .order("exploitation", { ascending: true })
-      .order("name", { ascending: true }),
+      .order("exploitation")
+      .order("name"),
     db.from("piegeage_observations")
       .select("id, parcel_id, pest, observed_on, captures, created_by, created_at")
-      .order("observed_on", { ascending: true })
-      .order("created_at", { ascending: true })
+      .order("observed_on")
+      .order("created_at")
   ]);
 
-  if (parcelResult.error || observationResult.error) {
-    const message = parcelResult.error?.message || observationResult.error?.message;
-    setMessage(el("globalMessage"), `Impossible de charger Supabase : ${message}`, true);
+  if (p.error || o.error) {
+    setMessage(
+      $("globalMessage"),
+      `Impossible de charger les données : ${p.error?.message || o.error?.message}`,
+      true
+    );
     return;
   }
 
-  parcels = parcelResult.data || [];
-  observations = observationResult.data || [];
+  parcels = p.data || [];
+  observations = o.data || [];
 
-  populateYearFilter();
-  populateFarmFilter();
-  renderParcelList();
-  refreshDashboard();
-
-  setMessage(el("globalMessage"));
+  populateYears();
+  populateFarms();
+  populateEntryFarms();
+  refresh();
+  setMessage($("globalMessage"));
 }
 
-function populateYearFilter(preferredYear = null) {
-  const select = el("yearSelect");
-  const previous = preferredYear || select.value;
-  const currentYear = String(new Date().getFullYear());
-  const years = [...new Set([currentYear, ...observations.map(item => item.observed_on.slice(0, 4))])]
+function populateYears(preferred = null) {
+  const select = $("yearSelect");
+  const current = String(new Date().getFullYear());
+  const previous = preferred || select.value;
+  const years = [...new Set([current, ...observations.map(o => o.observed_on.slice(0, 4))])]
     .sort((a, b) => b.localeCompare(a));
 
   select.innerHTML = "";
-  years.forEach(year => {
-    const option = document.createElement("option");
-    option.value = year;
-    option.textContent = year;
-    select.appendChild(option);
-  });
-
+  years.forEach(y => select.add(new Option(y, y)));
   select.value = years.includes(previous) ? previous : years[0];
 }
 
-function populateFarmFilter(preferredFarm = null, preferredParcelId = null) {
-  const farmSelect = el("farmSelect");
-  const previousFarm = preferredFarm || farmSelect.value;
-  const farms = [...new Set(parcels.map(parcel => parcel.exploitation))]
-    .sort((a, b) => a.localeCompare(b, "fr"));
+function populateFarms(preferred = null) {
+  const select = $("farmSelect");
+  const previous = preferred || select.value;
+  const farms = [...new Set(parcels.map(p => p.exploitation))].sort((a, b) => a.localeCompare(b, "fr"));
 
-  farmSelect.innerHTML = "";
-
+  select.innerHTML = "";
   if (!farms.length) {
-    const option = document.createElement("option");
-    option.value = "";
-    option.textContent = "Aucune exploitation";
-    farmSelect.appendChild(option);
-    farmSelect.disabled = true;
-    populateParcelFilter(null);
+    select.add(new Option("Aucune exploitation", ""));
+    select.disabled = true;
+    populateParcelFilter();
     return;
   }
 
-  farmSelect.disabled = false;
-  farms.forEach(farm => {
-    const option = document.createElement("option");
-    option.value = farm;
-    option.textContent = farm;
-    farmSelect.appendChild(option);
-  });
-
-  farmSelect.value = farms.includes(previousFarm) ? previousFarm : farms[0];
-  populateParcelFilter(preferredParcelId);
+  select.disabled = false;
+  farms.forEach(f => select.add(new Option(f, f)));
+  select.value = farms.includes(previous) ? previous : farms[0];
+  populateParcelFilter();
 }
 
-function populateParcelFilter(preferredParcelId = null) {
-  const parcelSelect = el("parcelSelect");
-  const previous = preferredParcelId || parcelSelect.value;
-  const farm = el("farmSelect").value;
-
-  const filtered = parcels
-    .filter(parcel => parcel.exploitation === farm)
+function populateParcelFilter(preferred = null) {
+  const select = $("parcelSelect");
+  const farm = $("farmSelect").value;
+  const previous = preferred || select.value;
+  const list = parcels
+    .filter(p => p.exploitation === farm)
     .sort((a, b) => a.name.localeCompare(b.name, "fr"));
 
-  parcelSelect.innerHTML = "";
-
-  if (!filtered.length) {
-    const option = document.createElement("option");
-    option.value = "";
-    option.textContent = "Aucune parcelle";
-    parcelSelect.appendChild(option);
-    parcelSelect.disabled = true;
+  select.innerHTML = "";
+  if (!list.length) {
+    select.add(new Option("Aucune parcelle", ""));
+    select.disabled = true;
     return;
   }
 
-  parcelSelect.disabled = false;
-  filtered.forEach(parcel => {
-    const option = document.createElement("option");
-    option.value = parcel.id;
-    option.textContent = parcel.name;
-    parcelSelect.appendChild(option);
-  });
-
-  parcelSelect.value = filtered.some(parcel => parcel.id === previous)
-    ? previous
-    : filtered[0].id;
+  select.disabled = false;
+  select.add(new Option("Toutes les parcelles", "all"));
+  list.forEach(p => select.add(new Option(p.name, p.id)));
+  select.value = previous === "all" || list.some(p => p.id === previous) ? previous : "all";
 }
 
-function selectedParcel() {
-  return parcels.find(parcel => parcel.id === el("parcelSelect").value) || null;
+function populateEntryFarms(preferredFarm = null, preferredParcel = null) {
+  const select = $("entryFarm");
+  const farms = [...new Set(parcels.map(p => p.exploitation))].sort((a, b) => a.localeCompare(b, "fr"));
+  const previous = preferredFarm || select.value;
+
+  select.innerHTML = "";
+  if (!farms.length) {
+    select.add(new Option("Aucune exploitation", ""));
+    select.disabled = true;
+    populateEntryParcels();
+    return;
+  }
+
+  select.disabled = false;
+  farms.forEach(f => select.add(new Option(f, f)));
+  select.value = farms.includes(previous) ? previous : farms[0];
+  populateEntryParcels(preferredParcel);
 }
 
-function filteredObservations() {
-  const parcel = selectedParcel();
-  if (!parcel) return [];
+function populateEntryParcels(preferred = null) {
+  const select = $("entryParcel");
+  const farm = $("entryFarm").value;
+  const list = parcels
+    .filter(p => p.exploitation === farm)
+    .sort((a, b) => a.name.localeCompare(b.name, "fr"));
+
+  select.innerHTML = "";
+  if (!list.length) {
+    select.add(new Option("Aucune parcelle", ""));
+    select.disabled = true;
+    return;
+  }
+
+  select.disabled = false;
+  list.forEach(p => select.add(new Option(p.name, p.id)));
+  if (preferred && list.some(p => p.id === preferred)) select.value = preferred;
+}
+
+function activeParcels() {
+  const farm = $("farmSelect").value;
+  const parcelValue = $("parcelSelect").value;
+  const farmParcels = parcels.filter(p => p.exploitation === farm);
+  return parcelValue === "all"
+    ? farmParcels
+    : farmParcels.filter(p => p.id === parcelValue);
+}
+
+function activeObservations() {
+  const ids = new Set(activeParcels().map(p => p.id));
+  const pest = $("pestSelect").value;
+  const year = $("yearSelect").value;
 
   return observations
-    .filter(item =>
-      item.parcel_id === parcel.id &&
-      item.pest === el("pestSelect").value &&
-      item.observed_on.startsWith(el("yearSelect").value)
-    )
-    .sort((a, b) =>
-      a.observed_on.localeCompare(b.observed_on) ||
-      a.created_at.localeCompare(b.created_at)
-    );
+    .filter(o => ids.has(o.parcel_id) && o.pest === pest && o.observed_on.startsWith(year))
+    .sort((a, b) => a.observed_on.localeCompare(b.observed_on) || a.created_at.localeCompare(b.created_at));
 }
 
-function aggregateByDate(records, mode) {
-  const groups = new Map();
-
-  records.forEach(record => {
-    if (!groups.has(record.observed_on)) groups.set(record.observed_on, []);
-    groups.get(record.observed_on).push(Number(record.captures));
+function aggregateParcelRecords(records, mode) {
+  const byDate = new Map();
+  records.forEach(r => {
+    if (!byDate.has(r.observed_on)) byDate.set(r.observed_on, []);
+    byDate.get(r.observed_on).push(Number(r.captures));
   });
 
-  return [...groups.entries()]
+  return [...byDate.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([date, values]) => ({
       date,
       value: mode === "average"
-        ? values.reduce((sum, value) => sum + value, 0) / values.length
-        : values.reduce((sum, value) => sum + value, 0),
-      entries: values.length
+        ? values.reduce((s, v) => s + v, 0) / values.length
+        : values.reduce((s, v) => s + v, 0)
     }));
 }
 
-function cumulative(values) {
+function buildParcelSeries() {
+  const mode = $("calculationSelect").value;
+  const pest = $("pestSelect").value;
+  const year = $("yearSelect").value;
+
+  return activeParcels().map(parcel => {
+    const records = observations.filter(
+      o => o.parcel_id === parcel.id && o.pest === pest && o.observed_on.startsWith(year)
+    );
+    return { parcel, points: aggregateParcelRecords(records, mode) };
+  }).filter(series => series.points.length);
+}
+
+function cumulativePoints(points) {
   let total = 0;
-  return values.map(value => {
-    total += value;
-    return total;
+  return points.map(p => ({ date: p.date, value: (total += p.value) }));
+}
+
+function metricSeries() {
+  const mode = $("calculationSelect").value;
+  const records = activeObservations();
+  const grouped = new Map();
+
+  records.forEach(r => {
+    if (!grouped.has(r.observed_on)) grouped.set(r.observed_on, []);
+    grouped.get(r.observed_on).push(Number(r.captures));
   });
+
+  return [...grouped.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, values]) => ({
+      date,
+      value: mode === "average"
+        ? values.reduce((s, v) => s + v, 0) / values.length
+        : values.reduce((s, v) => s + v, 0)
+    }));
 }
 
-function calculateTrend(values) {
+function trend(values) {
   if (values.length < 2) return "À compléter";
-
   const last = values.at(-1);
-  const prior = values.length >= 3
-    ? (values.at(-2) + values.at(-3)) / 2
-    : values.at(-2);
-
-  const delta = last - prior;
-  if (Math.abs(delta) < 0.5) return "Stable";
-  return delta > 0 ? "En augmentation" : "En diminution";
+  const base = values.length >= 3 ? (values.at(-2) + values.at(-3)) / 2 : values.at(-2);
+  if (Math.abs(last - base) < 0.5) return "Stable";
+  return last > base ? "En augmentation" : "En diminution";
 }
 
-function refreshDashboard() {
-  updateSelectedParcelSummary();
+function refresh() {
+  renderMetrics();
+  renderChart();
+  renderHistory();
+}
 
-  const records = filteredObservations();
-  const mode = el("calculationSelect").value;
-  const display = el("displaySelect").value;
-  const series = aggregateByDate(records, mode);
-  const values = series.map(item => item.value);
-  const plottedValues = display === "cumulative" ? cumulative(values) : values;
+function renderMetrics() {
+  const records = activeObservations();
+  const series = metricSeries();
+  const values = series.map(x => x.value);
   const last = series.at(-1);
 
-  const unit = mode === "average" ? "captures en moyenne" : "captures";
-  el("lastValue").textContent = last ? `${formatNumber(last.value)} ${mode === "average" ? "captures" : "captures"}` : "—";
-  el("lastDate").textContent = last ? `Relevé du ${formatDate(last.date)}` : "Aucune donnée";
-  el("trendValue").textContent = calculateTrend(values);
-  el("seasonTotal").textContent = series.length ? formatNumber(values.reduce((sum, value) => sum + value, 0)) : "—";
-  el("seasonUnit").textContent = mode === "average" ? "somme des moyennes par date" : "captures cumulées";
-  el("recordCount").textContent = String(records.length);
-  el("lastUpdate").textContent = records.length
-    ? `Dernier enregistrement : ${formatDateTime(records.at(-1).created_at)}`
-    : "Aucune mise à jour";
+  $("lastValue").textContent = last ? `${formatNumber(last.value)} captures` : "—";
+  $("lastDate").textContent = last ? `Relevé du ${formatDate(last.date)}` : "Aucune donnée";
+  $("trendValue").textContent = trend(values);
+  $("seasonTotal").textContent = values.length ? formatNumber(values.reduce((s, v) => s + v, 0)) : "—";
+  $("seasonUnit").textContent = $("calculationSelect").value === "average"
+    ? "somme des moyennes par date"
+    : "captures cumulées";
+  $("recordCount").textContent = String(records.length);
 
-  renderChart(series, plottedValues, mode, display);
-  renderHistory(records);
-  setEntryAvailability(Boolean(selectedParcel()));
+  const latestCreated = records.slice().sort((a, b) => a.created_at.localeCompare(b.created_at)).at(-1);
+  $("lastUpdate").textContent = latestCreated ? `Dernière saisie : ${formatDateTime(latestCreated.created_at)}` : "Aucune mise à jour";
 }
 
-function renderChart(series, plottedValues, mode, display) {
-  if (trapChart) {
-    trapChart.destroy();
-    trapChart = null;
+function renderChart() {
+  if (chart) {
+    chart.destroy();
+    chart = null;
   }
 
-  const canvas = el("trapChart");
-  const empty = el("chartEmpty");
-  const parcel = selectedParcel();
-  const pestLabel = PESTS[el("pestSelect").value] || el("pestSelect").value;
+  const canvas = $("trapChart");
+  const empty = $("chartEmpty");
+  const series = buildParcelSeries();
+  const display = $("displaySelect").value;
 
-  if (!series.length || !parcel) {
+  if (!series.length) {
     canvas.style.display = "none";
     empty.style.display = "grid";
-    empty.textContent = parcel
-      ? "Aucun relevé pour cette sélection."
-      : "Créez une parcelle puis ajoutez un premier relevé.";
-    el("chartTitle").textContent = "Captures par relevé";
+    empty.textContent = "Aucune donnée pour cette sélection.";
+    $("chartTitle").textContent = "Captures par relevé";
     return;
   }
 
   canvas.style.display = "block";
   empty.style.display = "none";
 
-  el("chartTitle").textContent = display === "cumulative"
-    ? `Cumul saisonnier — ${pestLabel}`
-    : `Dynamique des captures — ${pestLabel}`;
+  const allDates = [...new Set(
+    series.flatMap(s => (display === "cumulative" ? cumulativePoints(s.points) : s.points).map(p => p.date))
+  )].sort();
 
-  trapChart = new Chart(canvas, {
+  const datasets = series.map((s, index) => {
+    const points = display === "cumulative" ? cumulativePoints(s.points) : s.points;
+    const map = new Map(points.map(p => [p.date, p.value]));
+    return {
+      label: s.parcel.name,
+      data: allDates.map(date => map.has(date) ? map.get(date) : null),
+      borderColor: COLORS[index % COLORS.length],
+      backgroundColor: COLORS[index % COLORS.length],
+      tension: 0.22,
+      pointRadius: 4,
+      pointHoverRadius: 6,
+      borderWidth: 2.4,
+      spanGaps: true
+    };
+  });
+
+  $("chartTitle").textContent = display === "cumulative"
+    ? `Cumul saisonnier — ${PESTS[$("pestSelect").value]}`
+    : `Dynamique des captures — ${PESTS[$("pestSelect").value]}`;
+
+  chart = new Chart(canvas, {
     type: "line",
     data: {
-      labels: series.map(item => formatDate(item.date)),
-      datasets: [{
-        label: `${parcel.name} — ${pestLabel}`,
-        data: plottedValues,
-        borderColor: SAM_COLOR,
-        backgroundColor: SAM_COLOR_SOFT,
-        fill: true,
-        tension: 0.25,
-        pointRadius: 4,
-        pointHoverRadius: 6,
-        borderWidth: 2.5
-      }]
+      labels: allDates.map(formatDate),
+      datasets
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      interaction: {
-        intersect: false,
-        mode: "index"
-      },
+      interaction: { mode: "nearest", intersect: false },
       plugins: {
         legend: {
+          display: datasets.length > 1,
           position: "bottom",
-          labels: {
-            usePointStyle: true,
-            boxWidth: 8,
-            padding: 18
-          }
+          labels: { usePointStyle: true, boxWidth: 8, padding: 17 }
         }
       },
       scales: {
-        x: {
-          grid: { display: false },
-          ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 12 }
-        },
+        x: { grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 12 } },
         y: {
           beginAtZero: true,
           title: {
             display: true,
             text: display === "cumulative"
               ? "Cumul des captures"
-              : (mode === "average" ? "Moyenne des captures" : "Total des captures")
+              : ($("calculationSelect").value === "average" ? "Moyenne des captures" : "Total des captures")
           },
-          grid: { color: "rgba(102, 113, 123, 0.13)" }
+          grid: { color: "rgba(102,113,123,.13)" }
         }
       }
     }
   });
 }
 
-function renderHistory(records) {
-  const tbody = el("historyBody");
+function renderHistory() {
+  const tbody = $("historyBody");
   tbody.innerHTML = "";
+  const records = activeObservations().slice().sort(
+    (a, b) => b.observed_on.localeCompare(a.observed_on) || b.created_at.localeCompare(a.created_at)
+  );
 
   if (!records.length) {
     const row = document.createElement("tr");
     row.className = "empty-row";
-    row.innerHTML = `<td colspan="3">Aucun relevé enregistré pour cette sélection.</td>`;
+    row.innerHTML = '<td colspan="4">Aucun relevé enregistré pour cette sélection.</td>';
     tbody.appendChild(row);
     return;
   }
 
-  records
-    .slice()
-    .sort((a, b) =>
-      b.observed_on.localeCompare(a.observed_on) ||
-      b.created_at.localeCompare(a.created_at)
-    )
-    .forEach(record => {
-      const row = document.createElement("tr");
-
-      const date = document.createElement("td");
-      date.textContent = formatDate(record.observed_on);
-
-      const captures = document.createElement("td");
-      const strong = document.createElement("strong");
-      strong.textContent = formatNumber(record.captures, 0);
-      captures.appendChild(strong);
-
-      const created = document.createElement("td");
-      created.textContent = formatDateTime(record.created_at);
-
-      row.append(date, captures, created);
-      tbody.appendChild(row);
-    });
+  const parcelMap = new Map(parcels.map(p => [p.id, p.name]));
+  records.forEach(r => {
+    const row = document.createElement("tr");
+    [formatDate(r.observed_on), parcelMap.get(r.parcel_id) || "—", formatNumber(r.captures, 0), formatDateTime(r.created_at)]
+      .forEach((text, i) => {
+        const td = document.createElement("td");
+        td.textContent = text;
+        if (i === 2) td.style.fontWeight = "800";
+        row.appendChild(td);
+      });
+    tbody.appendChild(row);
+  });
 }
 
-function updateSelectedParcelSummary() {
-  const parcel = selectedParcel();
-  const box = el("selectedParcelSummary");
-
-  if (!parcel) {
-    box.innerHTML = "<strong>Aucune parcelle sélectionnée</strong>Créez d’abord une parcelle.";
-    return;
-  }
-
-  box.innerHTML = "";
-  const title = document.createElement("strong");
-  title.textContent = `${parcel.exploitation} — ${parcel.name}`;
-  const details = document.createElement("span");
-  details.textContent = `${parcel.variety} · ${formatNumber(parcel.area_ha, 2)} ha`;
-  box.append(title, details);
-}
-
-function setEntryAvailability(enabled) {
-  el("observationDate").disabled = !enabled;
-  el("observationCount").disabled = !enabled;
-  el("observationForm").querySelector("button").disabled = !enabled;
-  el("exportCsvButton").disabled = !enabled;
-}
-
-async function saveObservation(event) {
+async function createParcel(event) {
   event.preventDefault();
-  setMessage(el("observationMessage"));
+  if (!currentUser) return;
 
-  const parcel = selectedParcel();
-  if (!parcel) {
-    setMessage(el("observationMessage"), "Créez et sélectionnez une parcelle avant d’ajouter un relevé.", true);
-    return;
-  }
-
-  const observedOn = el("observationDate").value;
-  const captures = Number(el("observationCount").value);
-
-  if (!observedOn || !Number.isInteger(captures) || captures < 0) {
-    setMessage(el("observationMessage"), "Renseignez une date et un nombre entier de captures.", true);
-    return;
-  }
-
-  const payload = {
-    parcel_id: parcel.id,
-    pest: el("pestSelect").value,
-    observed_on: observedOn,
-    captures,
-    created_by: currentUser.id
-  };
-
-  const { data, error } = await db
-    .from("piegeage_observations")
-    .insert(payload)
-    .select("id, parcel_id, pest, observed_on, captures, created_by, created_at")
-    .single();
-
-  if (error) {
-    setMessage(el("observationMessage"), `Enregistrement impossible : ${error.message}`, true);
-    return;
-  }
-
-  observations.push(data);
-  observations.sort((a, b) =>
-    a.observed_on.localeCompare(b.observed_on) ||
-    a.created_at.localeCompare(b.created_at)
-  );
-
-  populateYearFilter(observedOn.slice(0, 4));
-  el("observationForm").reset();
-  el("observationDate").value = observedOn;
-  setMessage(el("observationMessage"), "Relevé enregistré dans Supabase.");
-  refreshDashboard();
-}
-
-async function saveParcel(event) {
-  event.preventDefault();
-  setMessage(el("parcelMessage"));
-
-  const exploitation = el("parcelFarm").value.trim();
-  const name = el("parcelName").value.trim();
-  const variety = el("parcelVariety").value.trim();
-  const area = Number(el("parcelArea").value);
+  setMessage($("parcelMessage"));
+  const exploitation = $("parcelFarm").value.trim();
+  const name = $("parcelName").value.trim();
+  const variety = $("parcelVariety").value.trim();
+  const area = Number($("parcelArea").value);
 
   if (!exploitation || !name || !variety || !Number.isFinite(area) || area < 0) {
-    setMessage(el("parcelMessage"), "Renseignez l’exploitation, la parcelle, la variété et une surface valide.", true);
+    setMessage($("parcelMessage"), "Renseignez tous les champs.", true);
     return;
   }
 
-  const payload = {
-    exploitation,
-    name,
-    variety,
-    area_ha: area,
-    created_by: currentUser.id
-  };
-
-  const { data, error } = await db
-    .from("piegeage_parcels")
-    .insert(payload)
+  const { data, error } = await db.from("piegeage_parcels")
+    .insert({
+      exploitation,
+      name,
+      variety,
+      area_ha: area,
+      created_by: currentUser.id
+    })
     .select("id, exploitation, name, variety, area_ha, created_by, created_at")
     .single();
 
   if (error) {
-    const friendly = error.code === "23505"
-      ? "Cette parcelle existe déjà pour cette exploitation."
-      : `Création impossible : ${error.message}`;
-    setMessage(el("parcelMessage"), friendly, true);
+    setMessage(
+      $("parcelMessage"),
+      error.code === "23505" ? "Cette parcelle existe déjà pour cette exploitation." : `Création impossible : ${error.message}`,
+      true
+    );
     return;
   }
 
   parcels.push(data);
-  parcels.sort((a, b) =>
-    a.exploitation.localeCompare(b.exploitation, "fr") ||
-    a.name.localeCompare(b.name, "fr")
-  );
-
-  el("parcelForm").reset();
-  setMessage(el("parcelMessage"), "Parcelle créée.");
-  populateFarmFilter(data.exploitation, data.id);
-  renderParcelList();
-  refreshDashboard();
+  $("parcelForm").reset();
+  populateFarms(data.exploitation);
+  populateEntryFarms(data.exploitation, data.id);
+  $("parcelSelect").value = data.id;
+  refresh();
+  setMessage($("parcelMessage"), "Parcelle créée.");
 }
 
-function renderParcelList() {
-  const container = el("parcelList");
-  container.innerHTML = "";
+async function createObservation(event) {
+  event.preventDefault();
+  if (!currentUser) return;
 
-  if (!parcels.length) {
-    const empty = document.createElement("div");
-    empty.className = "empty-state";
-    empty.style.display = "grid";
-    empty.textContent = "Aucune parcelle enregistrée.";
-    container.appendChild(empty);
+  setMessage($("observationMessage"));
+  const parcelId = $("entryParcel").value;
+  const pest = $("entryPest").value;
+  const date = $("observationDate").value;
+  const captures = Number($("observationCount").value);
+
+  if (!parcelId || !pest || !date || !Number.isInteger(captures) || captures < 0) {
+    setMessage($("observationMessage"), "Renseignez tous les champs correctement.", true);
     return;
   }
 
-  parcels.forEach(parcel => {
-    const item = document.createElement("div");
-    item.className = "parcel-item";
+  const { data, error } = await db.from("piegeage_observations")
+    .insert({
+      parcel_id: parcelId,
+      pest,
+      observed_on: date,
+      captures,
+      created_by: currentUser.id
+    })
+    .select("id, parcel_id, pest, observed_on, captures, created_by, created_at")
+    .single();
 
-    const info = document.createElement("div");
-    const title = document.createElement("strong");
-    title.textContent = `${parcel.exploitation} — ${parcel.name}`;
-    const details = document.createElement("span");
-    details.textContent = parcel.variety;
-    info.append(title, details);
+  if (error) {
+    setMessage($("observationMessage"), `Enregistrement impossible : ${error.message}`, true);
+    return;
+  }
 
-    const area = document.createElement("span");
-    area.className = "parcel-area";
-    area.textContent = `${formatNumber(parcel.area_ha, 2)} ha`;
+  observations.push(data);
+  populateYears(date.slice(0, 4));
 
-    item.append(info, area);
-    container.appendChild(item);
-  });
+  const parcel = parcels.find(p => p.id === parcelId);
+  if (parcel) {
+    populateFarms(parcel.exploitation);
+    $("parcelSelect").value = parcel.id;
+  }
+  $("pestSelect").value = pest;
+  $("yearSelect").value = date.slice(0, 4);
+
+  $("observationCount").value = "";
+  refresh();
+  setMessage($("observationMessage"), "Relevé enregistré.");
 }
 
 function exportCsv() {
-  const parcel = selectedParcel();
-  const records = filteredObservations();
-  if (!parcel) return;
+  const records = activeObservations();
+  const parcelMap = new Map(parcels.map(p => [p.id, p]));
+  const rows = [["Ravageur", "Année", "Exploitation", "Parcelle", "Variété", "Surface (ha)", "Date du relevé", "Captures"]];
 
-  const rows = [
-    ["Ravageur", "Année", "Exploitation", "Parcelle", "Variété", "Surface (ha)", "Date du relevé", "Captures"]
-  ];
-
-  records.forEach(record => {
+  records.forEach(r => {
+    const p = parcelMap.get(r.parcel_id);
     rows.push([
-      PESTS[record.pest] || record.pest,
-      record.observed_on.slice(0, 4),
-      parcel.exploitation,
-      parcel.name,
-      parcel.variety,
-      parcel.area_ha,
-      record.observed_on,
-      record.captures
+      PESTS[r.pest] || r.pest,
+      r.observed_on.slice(0, 4),
+      p?.exploitation || "",
+      p?.name || "",
+      p?.variety || "",
+      p?.area_ha ?? "",
+      r.observed_on,
+      r.captures
     ]);
   });
 
-  const csv = "\ufeff" + rows
-    .map(row => row.map(escapeCsv).join(";"))
-    .join("\r\n");
-
+  const quote = v => `"${String(v ?? "").replaceAll('"', '""')}"`;
+  const csv = "\ufeff" + rows.map(row => row.map(quote).join(";")).join("\r\n");
   const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
   const link = document.createElement("a");
   link.href = url;
-  link.download = `sam_piegeage_${parcel.name.replaceAll(" ", "_")}_${el("yearSelect").value}.csv`;
+  link.download = `sam_piegeage_${$("yearSelect").value}.csv`;
   document.body.appendChild(link);
   link.click();
   link.remove();
@@ -659,47 +564,64 @@ function exportCsv() {
 }
 
 function openParcelDialog() {
-  setMessage(el("parcelMessage"));
-  renderParcelList();
-  el("parcelDialog").showModal();
+  if (!currentUser) return;
+  setMessage($("parcelMessage"));
+  $("parcelDialog").showModal();
 }
 
-function closeParcelDialog() {
-  el("parcelDialog").close();
+function openObservationDialog() {
+  if (!currentUser) return;
+  setMessage($("observationMessage"));
+
+  if (!parcels.length) {
+    setMessage($("globalMessage"), "Créez d’abord une parcelle.", true);
+    return;
+  }
+
+  const currentFarm = $("farmSelect").value;
+  const currentParcel = $("parcelSelect").value;
+  populateEntryFarms(currentFarm, currentParcel !== "all" ? currentParcel : null);
+  $("entryPest").value = $("pestSelect").value;
+  $("observationDate").value = new Date().toISOString().slice(0, 10);
+  $("observationDialog").showModal();
 }
 
-function bindEvents() {
-  el("authForm").addEventListener("submit", signIn);
-  el("signUpButton").addEventListener("click", signUp);
-  el("signOutButton").addEventListener("click", signOut);
+function bind() {
+  $("loginButton").addEventListener("click", login);
+  $("authPassword").addEventListener("keydown", e => { if (e.key === "Enter") login(); });
+  $("logoutButton").addEventListener("click", logout);
 
-  el("addParcelButton").addEventListener("click", openParcelDialog);
-  el("manageParcelsButton").addEventListener("click", openParcelDialog);
-  el("closeParcelDialog").addEventListener("click", closeParcelDialog);
-  el("parcelForm").addEventListener("submit", saveParcel);
+  $("addParcelButton").addEventListener("click", openParcelDialog);
+  $("addObservationButton").addEventListener("click", openObservationDialog);
+  $("closeParcelDialog").addEventListener("click", () => $("parcelDialog").close());
+  $("closeObservationDialog").addEventListener("click", () => $("observationDialog").close());
 
-  el("parcelDialog").addEventListener("click", event => {
-    if (event.target === el("parcelDialog")) closeParcelDialog();
+  $("parcelForm").addEventListener("submit", createParcel);
+  $("observationForm").addEventListener("submit", createObservation);
+
+  $("entryFarm").addEventListener("change", () => populateEntryParcels());
+
+  $("pestSelect").addEventListener("change", refresh);
+  $("yearSelect").addEventListener("change", refresh);
+  $("calculationSelect").addEventListener("change", refresh);
+  $("displaySelect").addEventListener("change", refresh);
+
+  $("farmSelect").addEventListener("change", () => {
+    populateParcelFilter("all");
+    refresh();
   });
+  $("parcelSelect").addEventListener("change", refresh);
 
-  el("observationForm").addEventListener("submit", saveObservation);
-  el("exportCsvButton").addEventListener("click", exportCsv);
+  $("exportCsvButton").addEventListener("click", exportCsv);
 
-  el("pestSelect").addEventListener("change", refreshDashboard);
-  el("yearSelect").addEventListener("change", refreshDashboard);
-  el("calculationSelect").addEventListener("change", refreshDashboard);
-  el("displaySelect").addEventListener("change", refreshDashboard);
-
-  el("farmSelect").addEventListener("change", () => {
-    populateParcelFilter();
-    refreshDashboard();
+  [$("parcelDialog"), $("observationDialog")].forEach(dialog => {
+    dialog.addEventListener("click", e => {
+      if (e.target === dialog) dialog.close();
+    });
   });
-
-  el("parcelSelect").addEventListener("change", refreshDashboard);
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
-  bindEvents();
-  el("observationDate").value = new Date().toISOString().slice(0, 10);
-  await bootstrap();
+  bind();
+  await init();
 });
