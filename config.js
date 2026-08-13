@@ -1,8 +1,6 @@
 // Configuration Supabase de SAM Piégeage.
-// 1) Ouvrir votre projet Supabase.
-// 2) Project Settings > API.
-// 3) Copier l'URL du projet et la clé publique "anon".
-// Ne jamais mettre la clé "service_role" dans ce fichier.
+// La clé publishable est prévue pour être utilisée côté navigateur.
+// Ne jamais mettre de clé service_role / secret dans ce fichier.
 
 window.SAM_CONFIG = {
   SUPABASE_URL: "https://qdzbxpjlbaazdymthefm.supabase.co",
