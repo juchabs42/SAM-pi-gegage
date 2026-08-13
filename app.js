@@ -13,6 +13,7 @@ let currentUser = null;
 let parcels = [];
 let observations = [];
 let chart = null;
+let deferredInstallPrompt = null;
 
 const $ = (id) => document.getElementById(id);
 
@@ -441,10 +442,12 @@ function renderHistory() {
   const parcelMap = new Map(parcels.map(p => [p.id, p.name]));
   records.forEach(r => {
     const row = document.createElement("tr");
+    const labels = ["Date", "Parcelle", "Captures", "Enregistré"];
     [formatDate(r.observed_on), parcelMap.get(r.parcel_id) || "—", formatNumber(r.captures, 0), formatDateTime(r.created_at)]
       .forEach((text, i) => {
         const td = document.createElement("td");
         td.textContent = text;
+        td.dataset.label = labels[i];
         if (i === 2) td.style.fontWeight = "800";
         row.appendChild(td);
       });
@@ -597,8 +600,79 @@ function openObservationDialog() {
   $("observationDialog").showModal();
 }
 
+
+function isStandaloneMode() {
+  return window.matchMedia("(display-mode: standalone)").matches ||
+    window.navigator.standalone === true;
+}
+
+function isIOSDevice() {
+  return /iphone|ipad|ipod/i.test(window.navigator.userAgent);
+}
+
+function updateInstallButton() {
+  const button = $("installAppButton");
+  if (!button) return;
+
+  if (isStandaloneMode()) {
+    button.hidden = true;
+    return;
+  }
+
+  button.hidden = false;
+}
+
+async function installApp() {
+  if (isStandaloneMode()) {
+    $("installAppButton").hidden = true;
+    return;
+  }
+
+  if (deferredInstallPrompt) {
+    deferredInstallPrompt.prompt();
+    await deferredInstallPrompt.userChoice;
+    deferredInstallPrompt = null;
+    updateInstallButton();
+    return;
+  }
+
+  $("iosInstallHelp").classList.toggle("hidden", !isIOSDevice());
+  $("genericInstallHelp").classList.toggle("hidden", isIOSDevice());
+  $("installHelpDialog").showModal();
+}
+
+function setupInstallExperience() {
+  updateInstallButton();
+
+  window.addEventListener("beforeinstallprompt", event => {
+    event.preventDefault();
+    deferredInstallPrompt = event;
+    updateInstallButton();
+  });
+
+  window.addEventListener("appinstalled", () => {
+    deferredInstallPrompt = null;
+    updateInstallButton();
+  });
+
+  window.matchMedia("(display-mode: standalone)").addEventListener?.("change", updateInstallButton);
+}
+
+async function registerServiceWorker() {
+  if (!("serviceWorker" in navigator)) return;
+
+  try {
+    await navigator.serviceWorker.register("./service-worker.js", { scope: "./" });
+  } catch (error) {
+    console.warn("Service worker non enregistré :", error);
+  }
+}
+
+
 function bind() {
   $("loginForm").addEventListener("submit", login);
+  $("installAppButton").addEventListener("click", installApp);
+  $("closeInstallHelpDialog").addEventListener("click", () => $("installHelpDialog").close());
   $("logoutButton").addEventListener("click", logout);
 
   $("addParcelButton").addEventListener("click", openParcelDialog);
@@ -624,7 +698,7 @@ function bind() {
 
   $("exportCsvButton").addEventListener("click", exportCsv);
 
-  [$("parcelDialog"), $("observationDialog")].forEach(dialog => {
+  [$("parcelDialog"), $("observationDialog"), $("installHelpDialog")].forEach(dialog => {
     dialog.addEventListener("click", e => {
       if (e.target === dialog) dialog.close();
     });
@@ -633,5 +707,7 @@ function bind() {
 
 document.addEventListener("DOMContentLoaded", async () => {
   bind();
+  setupInstallExperience();
+  await registerServiceWorker();
   await init();
 });

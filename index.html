@@ -4,13 +4,17 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#d31145">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="SAM Piégeage">
   <link rel="icon" type="image/x-icon" href="favicon.ico">
   <link rel="icon" type="image/png" sizes="64x64" href="favicon.png">
   <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
   <link rel="manifest" href="site.webmanifest">
 <meta name="description" content="SAM Piégeage — suivi partagé des captures de ravageurs par parcelle.">
-<title>SAM Piégeage </title>
-<link rel="stylesheet" href="style.css?v=20260813-4">
+<title>SAM Piégeage</title>
+<link rel="stylesheet" href="style.css?v=20260813-5">
 </head>
 <body>
   <header class="topbar">
@@ -51,9 +55,16 @@
         <p>Visualisez les captures par exploitation et par parcelle. La saisie et la création de parcelles sont réservées aux utilisateurs connectés.</p>
       </div>
 
-      <div id="editActions" class="edit-actions" hidden>
-        <button id="addParcelButton" class="primary-button action-button" type="button">+ Créer une parcelle</button>
-        <button id="addObservationButton" class="secondary-button action-button" type="button">+ Ajouter un relevé</button>
+      <div class="heading-actions">
+        <button id="installAppButton" class="install-button" type="button">
+          <span class="install-icon" aria-hidden="true">↓</span>
+          Installer l’application
+        </button>
+
+        <div id="editActions" class="edit-actions" hidden>
+          <button id="addParcelButton" class="primary-button action-button" type="button">+ Créer une parcelle</button>
+          <button id="addObservationButton" class="secondary-button action-button" type="button">+ Ajouter un relevé</button>
+        </div>
       </div>
     </section>
 
@@ -236,6 +247,27 @@
     <div id="observationMessage" class="form-message" role="status"></div>
   </dialog>
 
+
+  <dialog id="installHelpDialog" class="app-dialog install-help-dialog">
+    <div class="dialog-header">
+      <div>
+        <p class="panel-kicker">Installation</p>
+        <h2>Installer SAM Piégeage</h2>
+      </div>
+      <button id="closeInstallHelpDialog" class="close-button" type="button" aria-label="Fermer">×</button>
+    </div>
+    <div class="install-help-content">
+      <div id="iosInstallHelp" class="install-help-block hidden">
+        <strong>Sur iPhone / iPad</strong>
+        <p>Dans Safari, appuyez sur le bouton de partage, puis choisissez <b>Sur l’écran d’accueil</b>.</p>
+      </div>
+      <div id="genericInstallHelp" class="install-help-block hidden">
+        <strong>Installation depuis le navigateur</strong>
+        <p>Ouvrez le menu du navigateur puis choisissez <b>Installer l’application</b> ou <b>Ajouter à l’écran d’accueil</b>.</p>
+      </div>
+    </div>
+  </dialog>
+
   <footer>
     <p>SAM Piégeage — SudExpé</p>
     <p>Outil de suivi des captures de ravageurs.</p>
@@ -243,7 +275,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-  <script src="config.js?v=20260813-4"></script>
-  <script src="app.js?v=20260813-4"></script>
+  <script src="config.js?v=20260813-5"></script>
+  <script src="app.js?v=20260813-5"></script>
 </body>
 </html>
