@@ -59,7 +59,7 @@ button { cursor: pointer; }
 }
 .login-row {
   display: grid;
-  grid-template-columns: minmax(145px, 1fr) minmax(125px, .8fr) auto auto;
+  grid-template-columns: minmax(145px, 1fr) minmax(125px, .8fr) auto;
   gap: 8px;
   align-items: end;
 }
@@ -84,17 +84,30 @@ button { cursor: pointer; }
   font-size: .78rem;
   font-weight: 800;
 }
-.access-status {
-  align-self: center;
-  white-space: nowrap;
-  color: var(--muted);
-  font-size: .72rem;
-  font-weight: 750;
+.logged-in-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
 }
-.access-status.edit { color: var(--success); }
-.logged-in-row { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
-.logged-in-row > div { display: grid; text-align: right; }
-.logged-in-row strong { max-width: 260px; overflow: hidden; text-overflow: ellipsis; font-size: .8rem; }
+.connected-info {
+  display: grid;
+  gap: 1px;
+  text-align: right;
+}
+.connected-label {
+  color: var(--success);
+  font-size: .72rem;
+  font-weight: 800;
+}
+.logged-in-row strong {
+  max-width: 260px;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: .8rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .logout-button {
   width: 34px;
   height: 34px;
@@ -299,7 +312,6 @@ footer p { margin: 0; }
   .topbar { align-items: flex-start; }
   .login-box { min-width: 56vw; }
   .login-row { grid-template-columns: 1fr 1fr auto; }
-  .access-status { grid-column: 1 / -1; justify-self: end; }
   .controls { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .control-button { width: 100%; }
 }
@@ -311,7 +323,6 @@ footer p { margin: 0; }
   .login-box { width: 100%; min-width: 0; }
   .login-row { grid-template-columns: 1fr 1fr; }
   .login-button { width: 100%; }
-  .access-status { grid-column: auto; justify-self: end; }
   main { width: min(100% - 20px, 1220px); padding-top: 22px; }
   .section-heading { display: grid; }
   .edit-actions { width: 100%; }
@@ -326,7 +337,6 @@ footer p { margin: 0; }
 }
 @media (max-width: 480px) {
   .login-row { grid-template-columns: 1fr; }
-  .access-status { justify-self: start; }
   .metric-grid { grid-template-columns: 1fr; }
   .controls { grid-template-columns: 1fr; }
   .control-button { grid-column: auto; }

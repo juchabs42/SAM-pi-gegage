@@ -7,7 +7,7 @@
   <meta name="theme-color" content="#D31145">
   <title>SAM Piégeage — SudExpé</title>
   <link rel="icon" type="image/png" href="favicon.png">
-  <link rel="stylesheet" href="style.css?v=20260813-1">
+  <link rel="stylesheet" href="style.css?v=20260813-2">
 </head>
 <body>
   <header class="topbar">
@@ -30,15 +30,14 @@
           <input id="authPassword" type="password" autocomplete="current-password" placeholder="••••••••">
         </label>
         <button id="loginButton" class="login-button" type="button">Connexion</button>
-        <span class="access-status">Lecture seule</span>
       </div>
 
       <div id="loggedInBox" class="logged-in-row" hidden>
-        <div>
-          <span class="access-status edit">Édition active</span>
+        <div class="connected-info">
+          <span class="connected-label">Connecté</span>
           <strong id="userEmail"></strong>
         </div>
-        <button id="logoutButton" class="logout-button" type="button" title="Se déconnecter" aria-label="Se déconnecter">↪</button>
+        <button id="logoutButton" class="logout-button" type="button" title="Se déconnecter" aria-label="Se déconnecter">↩</button>
       </div>
       <div id="authMessage" class="auth-message" role="status"></div>
     </div>
@@ -244,7 +243,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-  <script src="config.js?v=20260813-1"></script>
-  <script src="app.js?v=20260813-1"></script>
+  <script src="config.js?v=20260813-2"></script>
+  <script src="app.js?v=20260813-2"></script>
 </body>
 </html>
