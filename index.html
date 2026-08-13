@@ -14,7 +14,7 @@
   <link rel="manifest" href="site.webmanifest">
 <meta name="description" content="SAM Piégeage — suivi partagé des captures de ravageurs par parcelle.">
 <title>SAM Piégeage</title>
-<link rel="stylesheet" href="style.css?v=20260813-5">
+<link rel="stylesheet" href="style.css?v=20260813-6">
 </head>
 <body>
   <header class="topbar">
@@ -27,6 +27,11 @@
         <h1>SAM Piégeage</h1>
       </div>
     </div>
+
+    <button id="installAppButton" class="install-button install-button-header" type="button">
+      <span class="install-icon" aria-hidden="true">↓</span>
+      Installer l’application
+    </button>
 
     <div class="auth-card" aria-label="Connexion">
       <form id="loginForm" class="auth-form">
@@ -56,12 +61,7 @@
       </div>
 
       <div class="heading-actions">
-        <button id="installAppButton" class="install-button" type="button">
-          <span class="install-icon" aria-hidden="true">↓</span>
-          Installer l’application
-        </button>
-
-        <div id="editActions" class="edit-actions" hidden>
+<div id="editActions" class="edit-actions" hidden>
           <button id="addParcelButton" class="primary-button action-button" type="button">+ Créer une parcelle</button>
           <button id="addObservationButton" class="secondary-button action-button" type="button">+ Ajouter un relevé</button>
         </div>
@@ -275,7 +275,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-  <script src="config.js?v=20260813-5"></script>
-  <script src="app.js?v=20260813-5"></script>
+  <script src="config.js?v=20260813-6"></script>
+  <script src="app.js?v=20260813-6"></script>
 </body>
 </html>

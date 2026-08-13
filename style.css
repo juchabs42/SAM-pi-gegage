@@ -359,23 +359,22 @@ footer p { margin: 0; }
 }
 
 .install-button {
-  display: inline-flex;
+  display: none;
   align-items: center;
   justify-content: center;
   gap: 8px;
   min-height: 44px;
-  width: 100%;
   padding: 0 15px;
-  border: 1px solid var(--sam);
+  border: 1px solid #fff;
   border-radius: 10px;
-  color: var(--sam);
+  color: var(--brand-dark);
   background: #fff;
   font-weight: 800;
 }
 
 .install-button:hover {
-  color: #fff;
-  background: var(--sam);
+  color: var(--brand-dark);
+  background: #fff;
 }
 
 .install-button[hidden] {
@@ -416,13 +415,32 @@ footer p { margin: 0; }
   }
 
   .topbar {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    align-items: center;
     gap: 9px;
     padding: 9px 10px 11px;
   }
 
   .brand {
+    grid-column: 1 / -1;
     width: 100%;
     gap: 10px;
+  }
+
+  .install-button-header {
+    display: inline-flex;
+    width: 100%;
+    min-height: 44px;
+    white-space: nowrap;
+  }
+
+  .auth-card {
+    width: 100%;
+    min-width: 0;
+    margin-left: 0;
+    padding: 8px;
+    border-radius: 12px;
   }
 
   .logo-shell {
@@ -433,11 +451,6 @@ footer p { margin: 0; }
 
   .brand h1 {
     font-size: 1.06rem;
-  }
-
-  .auth-card {
-    padding: 8px;
-    border-radius: 12px;
   }
 
   .auth-form {
@@ -671,6 +684,17 @@ footer p { margin: 0; }
 }
 
 @media (max-width: 390px) {
+
+  .topbar {
+    grid-template-columns: 1fr;
+  }
+
+  .brand,
+  .install-button-header,
+  .auth-card {
+    grid-column: 1;
+  }
+
   .auth-form {
     grid-template-columns: 1fr;
   }
