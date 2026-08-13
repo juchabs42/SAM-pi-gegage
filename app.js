@@ -65,37 +65,48 @@ async function init() {
 
 function renderAuth() {
   const connected = Boolean(currentUser);
-  $("loggedOutBox").hidden = connected;
-  $("loggedInBox").hidden = !connected;
+
+  $("loginForm").classList.toggle("hidden", connected);
+  $("connectedBlock").classList.toggle("hidden", !connected);
   $("editActions").hidden = !connected;
-  $("userEmail").textContent = currentUser?.email || "";
+  $("connectedEmail").textContent = currentUser?.email || "";
+
   if (!connected) {
-    $("authPassword").value = "";
+    $("loginPassword").value = "";
   }
 }
 
-async function login() {
-  const email = $("authEmail").value.trim();
-  const password = $("authPassword").value;
-  setMessage($("authMessage"));
+async function login(event) {
+  if (event) event.preventDefault();
+
+  const email = $("loginEmail").value.trim();
+  const password = $("loginPassword").value;
+  setMessage($("loginMessage"));
 
   if (!email || !password) {
-    setMessage($("authMessage"), "Renseignez l’adresse mail et le mot de passe.", true);
+    setMessage($("loginMessage"), "Renseignez l’adresse mail et le mot de passe.", true);
     return;
   }
 
-  $("loginButton").disabled = true;
+  const submitButton = $("loginForm").querySelector("button[type='submit']");
+  submitButton.disabled = true;
+
   const { error } = await db.auth.signInWithPassword({ email, password });
-  $("loginButton").disabled = false;
+
+  submitButton.disabled = false;
 
   if (error) {
-    setMessage($("authMessage"), "Connexion impossible. Vérifiez l’adresse mail et le mot de passe.", true);
+    setMessage(
+      $("loginMessage"),
+      "Connexion impossible. Vérifiez l’adresse mail et le mot de passe.",
+      true
+    );
     return;
   }
 
-  setMessage($("authMessage"));
-  $("authEmail").value = "";
-  $("authPassword").value = "";
+  setMessage($("loginMessage"));
+  $("loginEmail").value = "";
+  $("loginPassword").value = "";
 }
 
 async function logout() {
@@ -587,8 +598,7 @@ function openObservationDialog() {
 }
 
 function bind() {
-  $("loginButton").addEventListener("click", login);
-  $("authPassword").addEventListener("keydown", e => { if (e.key === "Enter") login(); });
+  $("loginForm").addEventListener("submit", login);
   $("logoutButton").addEventListener("click", logout);
 
   $("addParcelButton").addEventListener("click", openParcelDialog);

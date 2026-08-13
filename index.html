@@ -7,39 +7,36 @@
   <meta name="theme-color" content="#D31145">
   <title>SAM Piégeage — SudExpé</title>
   <link rel="icon" type="image/png" href="favicon.png">
-  <link rel="stylesheet" href="style.css?v=20260813-2">
+  <link rel="stylesheet" href="style.css?v=20260813-3">
 </head>
 <body>
   <header class="topbar">
     <div class="brand">
-      <img src="logo-sudexpe.png" alt="SudExpé" class="brand-logo">
-      <div class="brand-text">
-        <p>Sud Agro Météo</p>
+      <div class="logo-shell">
+        <img src="logo-sudexpe.png" alt="Logo SudExpé" class="brand-logo">
+      </div>
+      <div class="brand-copy">
+        <p class="brand-kicker">Sud Agro Météo</p>
         <h1>SAM Piégeage</h1>
       </div>
     </div>
 
-    <div class="login-box" id="loginBox">
-      <div id="loggedOutBox" class="login-row">
-        <label>
-          <span>Adresse mail</span>
-          <input id="authEmail" type="email" autocomplete="email" placeholder="adresse@mail.fr">
-        </label>
-        <label>
-          <span>Mot de passe</span>
-          <input id="authPassword" type="password" autocomplete="current-password" placeholder="••••••••">
-        </label>
-        <button id="loginButton" class="login-button" type="button">Connexion</button>
+    <div class="auth-card" aria-label="Connexion">
+      <form id="loginForm" class="auth-form">
+        <input id="loginEmail" type="email" autocomplete="username" placeholder="Adresse mail" aria-label="Adresse mail" required>
+        <input id="loginPassword" type="password" autocomplete="current-password" placeholder="Mot de passe" aria-label="Mot de passe" required>
+        <button class="auth-button" type="submit">Connexion</button>
+      </form>
+
+      <div id="connectedBlock" class="connected-block hidden">
+        <div>
+          <span class="connected-label">Connecté</span>
+          <strong id="connectedEmail"></strong>
+        </div>
+        <button id="logoutButton" class="logout-button" type="button" title="Se déconnecter" aria-label="Se déconnecter">↪</button>
       </div>
 
-      <div id="loggedInBox" class="logged-in-row" hidden>
-        <div class="connected-info">
-          <span class="connected-label">Connecté</span>
-          <strong id="userEmail"></strong>
-        </div>
-        <button id="logoutButton" class="logout-button" type="button" title="Se déconnecter" aria-label="Se déconnecter">↩</button>
-      </div>
-      <div id="authMessage" class="auth-message" role="status"></div>
+      <p id="loginMessage" class="auth-message" role="status"></p>
     </div>
   </header>
 
@@ -243,7 +240,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-  <script src="config.js?v=20260813-2"></script>
-  <script src="app.js?v=20260813-2"></script>
+  <script src="config.js?v=20260813-3"></script>
+  <script src="app.js?v=20260813-3"></script>
 </body>
 </html>
