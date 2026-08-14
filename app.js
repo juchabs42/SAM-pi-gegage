@@ -72,9 +72,17 @@ function renderAuth() {
   $("editActions").hidden = !connected;
   $("connectedEmail").textContent = currentUser?.email || "";
 
+  const mobileToggle = $("mobileAuthToggle");
+  if (mobileToggle) {
+    mobileToggle.textContent = connected ? "Connecté" : "Connexion";
+    mobileToggle.setAttribute("aria-expanded", String(!$("authCard").classList.contains("mobile-collapsed")));
+  }
+
   if (!connected) {
     $("loginPassword").value = "";
   }
+
+  syncAuthCardMode();
 }
 
 async function login(event) {
@@ -108,6 +116,7 @@ async function login(event) {
   setMessage($("loginMessage"));
   $("loginEmail").value = "";
   $("loginPassword").value = "";
+  closeMobileAuthAfterLogin();
 }
 
 async function logout() {
@@ -601,6 +610,50 @@ function openObservationDialog() {
 }
 
 
+function isDesktopAuth() {
+  return !window.matchMedia("(max-width: 760px)").matches;
+}
+
+function syncAuthCardMode() {
+  const authCard = $("authCard");
+  const toggle = $("mobileAuthToggle");
+  if (!authCard || !toggle) return;
+
+  if (isDesktopAuth()) {
+    authCard.classList.remove("mobile-collapsed");
+    toggle.hidden = true;
+    return;
+  }
+
+  toggle.hidden = false;
+
+  if (!currentUser && !authCard.dataset.mobileOpened) {
+    authCard.classList.add("mobile-collapsed");
+  } else {
+    authCard.classList.remove("mobile-collapsed");
+  }
+
+  const expanded = !authCard.classList.contains("mobile-collapsed");
+  toggle.setAttribute("aria-expanded", String(expanded));
+  toggle.textContent = currentUser ? "Connecté" : "Connexion";
+}
+
+function toggleMobileAuthCard() {
+  const authCard = $("authCard");
+  if (!authCard || isDesktopAuth()) return;
+  authCard.dataset.mobileOpened = authCard.classList.contains("mobile-collapsed") ? "true" : "";
+  authCard.classList.toggle("mobile-collapsed");
+  $("mobileAuthToggle").setAttribute("aria-expanded", String(!authCard.classList.contains("mobile-collapsed")));
+}
+
+function closeMobileAuthAfterLogin() {
+  const authCard = $("authCard");
+  if (!authCard || isDesktopAuth()) return;
+  authCard.dataset.mobileOpened = "true";
+  authCard.classList.add("mobile-collapsed");
+  $("mobileAuthToggle").setAttribute("aria-expanded", "false");
+}
+
 function isStandaloneMode() {
   return window.matchMedia("(display-mode: standalone)").matches ||
     window.navigator.standalone === true;
@@ -614,7 +667,9 @@ function updateInstallButton() {
   const button = $("installAppButton");
   if (!button) return;
 
-  if (isStandaloneMode()) {
+  const mobileLike = window.matchMedia("(max-width: 760px)").matches || /iphone|ipad|ipod|android/i.test(window.navigator.userAgent);
+
+  if (isStandaloneMode() || !mobileLike) {
     button.hidden = true;
     return;
   }
@@ -643,6 +698,7 @@ async function installApp() {
 
 function setupInstallExperience() {
   updateInstallButton();
+  syncAuthCardMode();
 
   window.addEventListener("beforeinstallprompt", event => {
     event.preventDefault();
@@ -656,6 +712,10 @@ function setupInstallExperience() {
   });
 
   window.matchMedia("(display-mode: standalone)").addEventListener?.("change", updateInstallButton);
+  window.addEventListener("resize", () => {
+    updateInstallButton();
+    syncAuthCardMode();
+  });
 }
 
 async function registerServiceWorker() {
@@ -672,6 +732,7 @@ async function registerServiceWorker() {
 function bind() {
   $("loginForm").addEventListener("submit", login);
   $("installAppButton").addEventListener("click", installApp);
+  $("mobileAuthToggle").addEventListener("click", toggleMobileAuthCard);
   $("closeInstallHelpDialog").addEventListener("click", () => $("installHelpDialog").close());
   $("logoutButton").addEventListener("click", logout);
 

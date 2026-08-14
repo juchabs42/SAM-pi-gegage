@@ -14,7 +14,7 @@
   <link rel="manifest" href="site.webmanifest">
 <meta name="description" content="SAM Piégeage — suivi partagé des captures de ravageurs par parcelle.">
 <title>SAM Piégeage</title>
-<link rel="stylesheet" href="style.css?v=20260813-6">
+<link rel="stylesheet" href="style.css?v=20260813-7">
 </head>
 <body>
   <header class="topbar">
@@ -22,18 +22,26 @@
       <div class="logo-shell">
         <img src="logo-sudexpe.png" alt="Logo SudExpé" class="brand-logo">
       </div>
+      <div class="app-logo-shell">
+        <img src="logo-sam-piegeage.png" alt="Logo SAM Piégeage" class="app-logo">
+      </div>
       <div class="brand-copy">
         <p class="brand-kicker">Sud Agro Météo</p>
         <h1>SAM Piégeage</h1>
       </div>
     </div>
 
-    <button id="installAppButton" class="install-button install-button-header" type="button">
-      <span class="install-icon" aria-hidden="true">↓</span>
-      Installer l’application
-    </button>
+    <div class="mobile-top-actions">
+      <button id="installAppButton" class="install-chip" type="button">
+        <span class="install-icon" aria-hidden="true">↓</span>
+        Installer
+      </button>
+      <button id="mobileAuthToggle" class="mobile-auth-toggle" type="button" aria-expanded="false" aria-controls="authCard">
+        Connexion
+      </button>
+    </div>
 
-    <div class="auth-card" aria-label="Connexion">
+    <div id="authCard" class="auth-card" aria-label="Connexion">
       <form id="loginForm" class="auth-form">
         <input id="loginEmail" type="email" autocomplete="username" placeholder="Adresse mail" aria-label="Adresse mail" required>
         <input id="loginPassword" type="password" autocomplete="current-password" placeholder="Mot de passe" aria-label="Mot de passe" required>
@@ -275,7 +283,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-  <script src="config.js?v=20260813-6"></script>
-  <script src="app.js?v=20260813-6"></script>
+  <script src="config.js?v=20260813-7"></script>
+  <script src="app.js?v=20260813-7"></script>
 </body>
 </html>

@@ -1,11 +1,11 @@
-const CACHE_NAME = "sam-piegeage-v20260813-5";
+const CACHE_NAME = "sam-piegeage-v20260813-7";
 
 const CORE_ASSETS = [
   "./",
   "./index.html",
-  "./style.css?v=20260813-5",
-  "./app.js?v=20260813-5",
-  "./config.js?v=20260813-5",
+  "./style.css?v=20260813-7",
+  "./app.js?v=20260813-7",
+  "./config.js?v=20260813-7",
   "./site.webmanifest",
   "./favicon.ico",
   "./favicon.png",
@@ -14,7 +14,8 @@ const CORE_ASSETS = [
   "./android-chrome-512x512.png",
   "./icon-192-maskable.png",
   "./icon-512-maskable.png",
-  "./logo-sudexpe.png"
+  "./logo-sudexpe.png",
+  "./logo-sam-piegeage.png"
 ];
 
 self.addEventListener("install", event => {
