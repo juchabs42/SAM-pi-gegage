@@ -8,22 +8,24 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="SAM Piégeage">
-  <link rel="icon" type="image/x-icon" href="favicon.ico">
-  <link rel="icon" type="image/png" sizes="64x64" href="favicon.png">
-  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
-  <link rel="manifest" href="site.webmanifest">
 <meta name="description" content="SAM Piégeage — suivi partagé des captures de ravageurs par parcelle.">
 <title>SAM Piégeage</title>
-<link rel="stylesheet" href="style.css?v=20260813-7">
+  <link rel="icon" href="favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+  <link rel="manifest" href="site.webmanifest">
+
+<link rel="stylesheet" href="style.css?v=20260814-1">
 </head>
 <body>
   <header class="topbar">
     <div class="brand">
-      <div class="logo-shell">
+      <div class="logo-shell sud-shell">
         <img src="logo-sudexpe.png" alt="Logo SudExpé" class="brand-logo">
       </div>
-      <div class="app-logo-shell">
-        <img src="logo-sam-piegeage.png" alt="Logo SAM Piégeage" class="app-logo">
+      <div class="logo-shell sam-shell">
+        <img src="logo-sam-piegeage.png" alt="Logo SAM Piégeage" class="brand-logo app-brand-logo">
       </div>
       <div class="brand-copy">
         <p class="brand-kicker">Sud Agro Météo</p>
@@ -31,20 +33,19 @@
       </div>
     </div>
 
-    <div class="mobile-top-actions">
-      <button id="installAppButton" class="install-chip" type="button">
-        <span class="install-icon" aria-hidden="true">↓</span>
-        Installer
-      </button>
-      <button id="mobileAuthToggle" class="mobile-auth-toggle" type="button" aria-expanded="false" aria-controls="authCard">
-        Connexion
-      </button>
-    </div>
+    <button id="authToggleButton" class="auth-toggle-button mobile-only" type="button"
+            aria-expanded="false" aria-controls="authCard" aria-label="Afficher la connexion">
+      <img src="bouton-connexion.png" alt="" class="auth-toggle-icon" aria-hidden="true">
+    </button>
 
     <div id="authCard" class="auth-card" aria-label="Connexion">
+      <p class="auth-card-title mobile-only">Connexion</p>
+
       <form id="loginForm" class="auth-form">
-        <input id="loginEmail" type="email" autocomplete="username" placeholder="Adresse mail" aria-label="Adresse mail" required>
-        <input id="loginPassword" type="password" autocomplete="current-password" placeholder="Mot de passe" aria-label="Mot de passe" required>
+        <input id="loginEmail" type="email" autocomplete="username"
+               placeholder="Adresse mail" aria-label="Adresse mail" required>
+        <input id="loginPassword" type="password" autocomplete="current-password"
+               placeholder="Mot de passe" aria-label="Mot de passe" required>
         <button class="auth-button" type="submit">Connexion</button>
       </form>
 
@@ -53,7 +54,8 @@
           <span class="connected-label">Connecté</span>
           <strong id="connectedEmail"></strong>
         </div>
-        <button id="logoutButton" class="logout-button" type="button" title="Se déconnecter" aria-label="Se déconnecter">↪</button>
+        <button id="logoutButton" class="logout-button" type="button"
+                title="Se déconnecter" aria-label="Se déconnecter">↪</button>
       </div>
 
       <p id="loginMessage" class="auth-message" role="status"></p>
@@ -75,6 +77,28 @@
         </div>
       </div>
     </section>
+    <section id="installCard" class="panel install-panel mobile-only hidden"
+             aria-label="Installer l'application">
+      <div class="install-panel-header">
+        <div class="install-panel-logo-wrap">
+          <img src="logo-sam-piegeage.png" alt="Logo SAM Piégeage" class="install-panel-logo">
+        </div>
+        <div>
+          <p class="panel-kicker">Application</p>
+          <h3>Installer l'application</h3>
+          <p class="install-panel-text">
+            Ajoute SAM Piégeage sur l’écran d’accueil pour l’utiliser plus facilement sur téléphone.
+          </p>
+        </div>
+      </div>
+      <div class="install-panel-actions">
+        <button id="installButton" class="primary-button install-card-button" type="button">
+          Installer l’application
+        </button>
+      </div>
+      <div id="installMessage" class="install-inline-message hidden" role="status"></div>
+    </section>
+
 
     <div id="globalMessage" class="global-message" role="status"></div>
 
@@ -254,36 +278,14 @@
     </form>
     <div id="observationMessage" class="form-message" role="status"></div>
   </dialog>
-
-
-  <dialog id="installHelpDialog" class="app-dialog install-help-dialog">
-    <div class="dialog-header">
-      <div>
-        <p class="panel-kicker">Installation</p>
-        <h2>Installer SAM Piégeage</h2>
-      </div>
-      <button id="closeInstallHelpDialog" class="close-button" type="button" aria-label="Fermer">×</button>
-    </div>
-    <div class="install-help-content">
-      <div id="iosInstallHelp" class="install-help-block hidden">
-        <strong>Sur iPhone / iPad</strong>
-        <p>Dans Safari, appuyez sur le bouton de partage, puis choisissez <b>Sur l’écran d’accueil</b>.</p>
-      </div>
-      <div id="genericInstallHelp" class="install-help-block hidden">
-        <strong>Installation depuis le navigateur</strong>
-        <p>Ouvrez le menu du navigateur puis choisissez <b>Installer l’application</b> ou <b>Ajouter à l’écran d’accueil</b>.</p>
-      </div>
-    </div>
-  </dialog>
-
-  <footer>
+<footer>
     <p>SAM Piégeage — SudExpé</p>
     <p>Outil de suivi des captures de ravageurs.</p>
   </footer>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-  <script src="config.js?v=20260813-7"></script>
-  <script src="app.js?v=20260813-7"></script>
+  <script src="config.js?v=20260814-1"></script>
+  <script src="app.js?v=20260814-1"></script>
 </body>
 </html>

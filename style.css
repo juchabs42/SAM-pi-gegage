@@ -43,7 +43,7 @@ button { cursor: pointer; }
 .brand {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
   min-width: max-content;
 }
 .logo-shell {
@@ -67,7 +67,6 @@ button { cursor: pointer; }
 }
 .brand h1 { margin: 2px 0 0; font-size: 1.32rem; line-height: 1.15; }
 
-#authCard.auth-card,
 .auth-card {
   width: min(610px, 58vw);
   margin-left: auto;
@@ -315,40 +314,202 @@ footer p { margin: 0; }
   .control-button { width: 100%; }
 }
 @media (max-width: 760px) {
-  body {
+  .topbar { position: static; display: grid; gap: 8px; padding: 8px 11px 10px; }
+  .login-button { width: 100%; }
+  main { width: min(100% - 20px, 1220px); padding-top: 22px; }
+  .section-heading { display: grid; }
+  .edit-actions { width: 100%; }
+  .controls { grid-template-columns: 1fr 1fr; }
+  .control-button { grid-column: 1 / -1; }
+  .metric-grid { grid-template-columns: 1fr 1fr; }
+  .metric-card { padding: 14px; }
+  .chart-wrap, .chart-wrap.large { min-height: 315px; }
+  .dialog-form { grid-template-columns: 1fr; }
+  .full-span { grid-column: auto; }
+  footer { display: grid; }
+}
+@media (max-width: 480px) {
+  .metric-grid { grid-template-columns: 1fr; }
+  .controls { grid-template-columns: 1fr; }
+  .control-button { grid-column: auto; }
+}
+
+
+/* En-tête / connexion alignés sur SAM Tavelure */
+@media (max-width: 980px) {
+  .topbar { flex-wrap: wrap; }
+  .auth-card { width: 100%; margin-left: 0; }
+}
+
+@media (max-width: 720px) {
+  .topbar { position: static; padding: 10px 14px; }
+  .logo-shell { width: 112px; height: 48px; }
+  .brand-kicker { display: none; }
+  .brand h1 { font-size: 1.08rem; }
+  .auth-form { grid-template-columns: 1fr; }
+}
+
+
+
+
+/* =========================================================
+   En-tête, connexion mobile et installation
+   alignés sur SAM Tavelure
+   ========================================================= */
+
+.mobile-only { display: none; }
+
+.logo-shell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 11px;
+  background: #fff;
+  flex: none;
+}
+
+.sud-shell {
+  width: 148px;
+  height: 58px;
+  padding: 7px 9px;
+}
+
+.sam-shell {
+  width: 62px;
+  height: 58px;
+  padding: 5px;
+}
+
+/* Important : limite strictement le logo à son encart */
+.brand-logo {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.app-brand-logo {
+  border-radius: 10px;
+}
+
+.auth-toggle-button {
+  display: none;
+}
+
+.auth-card-title {
+  margin: 0 0 8px;
+  color: #fff;
+  font-size: .86rem;
+  font-weight: 800;
+}
+
+.install-panel {
+  border-color: #f1c5d0;
+  background: linear-gradient(180deg, #fff 0%, #fff7fa 100%);
+}
+
+.install-panel-header {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+
+.install-panel-logo-wrap {
+  width: 66px;
+  height: 66px;
+  flex: none;
+  overflow: hidden;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: inset 0 0 0 1px #f0d3da;
+}
+
+.install-panel-logo {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: cover;
+}
+
+.install-panel-text {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: .92rem;
+}
+
+.install-panel-actions {
+  margin-top: 14px;
+}
+
+.install-card-button {
+  width: 100%;
+  min-height: 46px;
+}
+
+.install-inline-message {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 11px;
+  color: #6b2438;
+  background: var(--brand-light);
+  font-size: .84rem;
+}
+
+@media (max-width: 720px) {
+  html {
     -webkit-text-size-adjust: 100%;
+  }
+
+  body {
     padding-bottom: env(safe-area-inset-bottom);
   }
 
+  .mobile-only {
+    display: block;
+  }
+
+  .mobile-only.hidden {
+    display: none !important;
+  }
+
   .topbar {
-    position: static;
+    position: sticky;
+    top: 0;
     display: grid;
-    grid-template-columns: 1fr;
-    align-items: stretch;
-    gap: 9px;
-    padding: 9px 10px 11px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: start;
+    min-height: 68px;
+    padding: calc(8px + env(safe-area-inset-top)) 10px 10px;
   }
 
   .brand {
-    width: 100%;
-    gap: 10px;
+    min-width: 0;
+    gap: 8px;
+    align-items: center;
   }
 
-  .logo-shell {
-    width: 100px;
-    height: 44px;
-    padding: 5px 7px;
+  .sud-shell {
+    width: 86px;
+    height: 42px;
+    padding: 5px 6px;
+    border-radius: 9px;
   }
 
-  .app-logo-shell {
-    width: 44px;
-    height: 44px;
+  .sam-shell {
+    width: 42px;
+    height: 42px;
     padding: 3px;
-    border-radius: 12px;
+    border-radius: 9px;
   }
 
-  .app-logo {
-    border-radius: 10px;
+  .brand-copy {
+    min-width: 0;
   }
 
   .brand-kicker {
@@ -356,112 +517,92 @@ footer p { margin: 0; }
   }
 
   .brand h1 {
-    font-size: 1.06rem;
+    overflow: hidden;
+    font-size: 1rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
-  .mobile-top-actions {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px;
-  }
-
-  .install-chip,
-  .mobile-auth-toggle {
+  .auth-toggle-button {
     display: inline-flex;
-    width: 100%;
-    min-height: 44px;
-    font-size: .92rem;
+    align-items: center;
+    justify-content: center;
+    width: 48px;
+    height: 48px;
+    padding: 0;
+    margin-left: auto;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    box-shadow: 0 5px 14px rgba(92, 7, 32, .24);
+    overflow: hidden;
   }
 
-  #authCard.auth-card,
+  .auth-toggle-icon {
+    display: block;
+    width: 48px;
+    height: 48px;
+    object-fit: cover;
+    border-radius: 50%;
+  }
+
+  .auth-toggle-button:active {
+    transform: scale(.96);
+  }
+
   .auth-card {
+    display: none;
+    grid-column: 1 / -1;
     width: 100%;
-    min-width: 0;
     margin-left: 0;
-    padding: 8px;
-    border-radius: 12px;
+    padding: 10px;
+    border-radius: 14px;
+    background: rgba(255,255,255,.15);
   }
 
-  #authCard.auth-card.mobile-collapsed {
-    display: none;
+  .auth-card.open {
+    display: block;
   }
 
   .auth-form {
-    grid-template-columns: 1fr 1fr;
-    gap: 7px;
+    grid-template-columns: 1fr;
   }
 
-  .auth-form input {
-    min-width: 0;
+  .auth-card input,
+  .auth-button {
     min-height: 44px;
     font-size: 16px;
   }
 
-  .auth-button {
-    grid-column: 1 / -1;
-    min-height: 44px;
-  }
-
-  .connected-block {
-    min-height: 44px;
-  }
-
   main {
-    width: min(100% - 14px, 1220px);
-    padding: 16px 0 28px;
+    width: min(100% - 16px, 1220px);
+    padding-top: 12px;
+  }
+
+  .panel {
+    padding: 14px;
+    margin-bottom: 12px;
+    border-radius: 14px;
   }
 
   .section-heading {
-    gap: 14px;
-    margin-bottom: 14px;
+    gap: 12px;
+    margin-bottom: 12px;
   }
 
   .section-heading h2 {
-    margin-top: 3px;
-    font-size: clamp(1.55rem, 7vw, 2rem);
-  }
-
-  .section-heading > div:first-child > p:last-child {
-    font-size: .9rem;
-  }
-
-  .heading-actions,
-  .edit-actions {
-    width: 100%;
-  }
-
-  .heading-actions {
-    grid-template-columns: 1fr;
-  }
-
-  .edit-actions {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px;
-  }
-
-  .action-button {
-    min-height: 48px;
+    font-size: 1.55rem;
+    line-height: 1.12;
   }
 
   .controls {
     grid-template-columns: 1fr 1fr;
-    gap: 9px;
-    margin: 12px 0 14px;
-    padding: 11px;
-    border-radius: 13px;
+    gap: 10px;
+    padding: 12px;
   }
 
   .controls label {
-    gap: 4px;
-    font-size: .74rem;
-  }
-
-  .controls select,
-  .controls input {
-    min-height: 46px;
-    padding: 8px 9px;
-    font-size: 16px;
+    min-width: 0;
   }
 
   .control-button {
@@ -472,94 +613,21 @@ footer p { margin: 0; }
   .metric-grid {
     grid-template-columns: 1fr 1fr;
     gap: 9px;
-    margin: 12px 0;
-  }
-
-  .metric-card {
-    min-height: 108px;
-    padding: 13px;
-    border-radius: 13px;
-  }
-
-  .metric-card strong {
-    font-size: 1.12rem;
-  }
-
-  .metric-card span {
-    font-size: .72rem;
-  }
-
-  .panel {
-    margin: 12px 0;
-    padding: 14px;
-    border-radius: 14px;
   }
 
   .chart-wrap,
   .chart-wrap.large {
-    min-height: 285px;
+    min-height: 300px;
   }
 
-  .table-wrap {
-    overflow: visible;
+  .install-panel-header {
+    align-items: flex-start;
   }
 
-  table,
-  thead,
-  tbody,
-  tr,
-  th,
-  td {
-    display: block;
-  }
-
-  thead {
-    display: none;
-  }
-
-  tbody {
-    display: grid;
-    gap: 10px;
-  }
-
-  tbody tr {
-    padding: 10px 12px;
-    border: 1px solid var(--line);
-    border-radius: 12px;
-    background: #fbfcfd;
-  }
-
-  tbody td {
-    display: grid;
-    grid-template-columns: minmax(90px, .7fr) 1fr;
-    gap: 10px;
-    align-items: center;
-    padding: 6px 0;
-    border-bottom: 1px solid #edf0f2;
-    text-align: right;
-  }
-
-  tbody td:last-child {
-    border-bottom: 0;
-  }
-
-  tbody td::before {
-    content: attr(data-label);
-    color: var(--muted);
-    font-size: .72rem;
-    font-weight: 800;
-    text-align: left;
-    text-transform: uppercase;
-  }
-
-  .empty-row td {
-    display: block;
-    padding: 20px 6px;
-    text-align: center;
-  }
-
-  .empty-row td::before {
-    display: none;
+  .install-panel-logo-wrap {
+    width: 58px;
+    height: 58px;
+    border-radius: 14px;
   }
 
   .app-dialog {
@@ -570,71 +638,16 @@ footer p { margin: 0; }
     border-radius: 18px 18px 0 0;
   }
 
-  .dialog-header {
-    position: sticky;
-    top: 0;
-    z-index: 2;
-    padding: 15px 14px;
-    background: #fff;
-  }
-
   .dialog-form {
     grid-template-columns: 1fr;
-    gap: 11px;
-    padding: 14px 14px 8px;
-  }
-
-  .dialog-form input,
-  .dialog-form select {
-    min-height: 48px;
-    font-size: 16px;
-  }
-
-  .dialog-form button {
-    min-height: 50px;
-  }
-
-  .full-span {
-    grid-column: auto;
-  }
-
-  .form-message {
-    padding: 0 14px 14px;
-  }
-
-  .logout-button,
-  .close-button {
-    min-width: 44px;
-    min-height: 44px;
   }
 
   footer {
-    padding: 18px 14px calc(18px + env(safe-area-inset-bottom));
-    gap: 6px;
+    display: grid;
   }
 }
 
-@media (max-width: 390px) {
-
-  .topbar {
-    grid-template-columns: 1fr;
-  }
-
-  .brand,
-  .install-button-header,
-  .auth-card {
-    grid-column: 1;
-  }
-
-  .auth-form {
-    grid-template-columns: 1fr;
-  }
-
-  .auth-button {
-    grid-column: auto;
-  }
-
-  .edit-actions,
+@media (max-width: 430px) {
   .controls,
   .metric-grid {
     grid-template-columns: 1fr;

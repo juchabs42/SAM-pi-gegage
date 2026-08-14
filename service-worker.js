@@ -1,11 +1,11 @@
-const CACHE_NAME = "sam-piegeage-v20260813-7";
+const CACHE_NAME = "sam-piegeage-v20260814-1";
 
 const CORE_ASSETS = [
   "./",
   "./index.html",
-  "./style.css?v=20260813-7",
-  "./app.js?v=20260813-7",
-  "./config.js?v=20260813-7",
+  "./style.css?v=20260814-1",
+  "./app.js?v=20260814-1",
+  "./config.js?v=20260814-1",
   "./site.webmanifest",
   "./favicon.ico",
   "./favicon.png",
@@ -15,6 +15,9 @@ const CORE_ASSETS = [
   "./icon-192-maskable.png",
   "./icon-512-maskable.png",
   "./logo-sudexpe.png",
+  "./favicon-32x32.png",
+  "./favicon-16x16.png",
+  "./bouton-connexion.png",
   "./logo-sam-piegeage.png"
 ];
 

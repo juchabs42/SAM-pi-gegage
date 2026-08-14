@@ -14,6 +14,7 @@ let parcels = [];
 let observations = [];
 let chart = null;
 let deferredInstallPrompt = null;
+const INSTALL_STORAGE_KEY = "samPiegeageInstalled";
 
 const $ = (id) => document.getElementById(id);
 
@@ -72,17 +73,9 @@ function renderAuth() {
   $("editActions").hidden = !connected;
   $("connectedEmail").textContent = currentUser?.email || "";
 
-  const mobileToggle = $("mobileAuthToggle");
-  if (mobileToggle) {
-    mobileToggle.textContent = connected ? "Connecté" : "Connexion";
-    mobileToggle.setAttribute("aria-expanded", String(!$("authCard").classList.contains("mobile-collapsed")));
-  }
-
   if (!connected) {
     $("loginPassword").value = "";
   }
-
-  syncAuthCardMode();
 }
 
 async function login(event) {
@@ -116,11 +109,12 @@ async function login(event) {
   setMessage($("loginMessage"));
   $("loginEmail").value = "";
   $("loginPassword").value = "";
-  closeMobileAuthAfterLogin();
+  closeMobileAuthCard();
 }
 
 async function logout() {
   await db.auth.signOut();
+  closeMobileAuthCard();
 }
 
 async function loadData() {
@@ -610,130 +604,159 @@ function openObservationDialog() {
 }
 
 
-function isDesktopAuth() {
-  return !window.matchMedia("(max-width: 760px)").matches;
-}
-
-function syncAuthCardMode() {
-  const authCard = $("authCard");
-  const toggle = $("mobileAuthToggle");
-  if (!authCard || !toggle) return;
-
-  if (isDesktopAuth()) {
-    authCard.classList.remove("mobile-collapsed");
-    toggle.hidden = true;
-    return;
-  }
-
-  toggle.hidden = false;
-
-  if (!currentUser && !authCard.dataset.mobileOpened) {
-    authCard.classList.add("mobile-collapsed");
-  } else {
-    authCard.classList.remove("mobile-collapsed");
-  }
-
-  const expanded = !authCard.classList.contains("mobile-collapsed");
-  toggle.setAttribute("aria-expanded", String(expanded));
-  toggle.textContent = currentUser ? "Connecté" : "Connexion";
-}
-
 function toggleMobileAuthCard() {
-  const authCard = $("authCard");
-  if (!authCard || isDesktopAuth()) return;
-  authCard.dataset.mobileOpened = authCard.classList.contains("mobile-collapsed") ? "true" : "";
-  authCard.classList.toggle("mobile-collapsed");
-  $("mobileAuthToggle").setAttribute("aria-expanded", String(!authCard.classList.contains("mobile-collapsed")));
+  const card = $("authCard");
+  const button = $("authToggleButton");
+  if (!card || !button || window.innerWidth > 720) return;
+
+  const open = card.classList.toggle("open");
+  button.setAttribute("aria-expanded", String(open));
 }
 
-function closeMobileAuthAfterLogin() {
-  const authCard = $("authCard");
-  if (!authCard || isDesktopAuth()) return;
-  authCard.dataset.mobileOpened = "true";
-  authCard.classList.add("mobile-collapsed");
-  $("mobileAuthToggle").setAttribute("aria-expanded", "false");
+function closeMobileAuthCard() {
+  const card = $("authCard");
+  const button = $("authToggleButton");
+  if (!card || !button || window.innerWidth > 720) return;
+
+  card.classList.remove("open");
+  button.setAttribute("aria-expanded", "false");
 }
 
-function isStandaloneMode() {
+function isAppMarkedInstalled() {
+  return window.localStorage.getItem(INSTALL_STORAGE_KEY) === "1";
+}
+
+function markAppInstalled() {
+  window.localStorage.setItem(INSTALL_STORAGE_KEY, "1");
+}
+
+function isStandalone() {
   return window.matchMedia("(display-mode: standalone)").matches ||
     window.navigator.standalone === true;
 }
 
-function isIOSDevice() {
-  return /iphone|ipad|ipod/i.test(window.navigator.userAgent);
+function isIOS() {
+  return /iphone|ipad|ipod/i.test(window.navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 }
 
-function updateInstallButton() {
-  const button = $("installAppButton");
-  if (!button) return;
-
-  const mobileLike = window.matchMedia("(max-width: 760px)").matches || /iphone|ipad|ipod|android/i.test(window.navigator.userAgent);
-
-  if (isStandaloneMode() || !mobileLike) {
-    button.hidden = true;
-    return;
+function isMobileDevice() {
+  if (navigator.userAgentData &&
+      typeof navigator.userAgentData.mobile === "boolean") {
+    return navigator.userAgentData.mobile;
   }
 
-  button.hidden = false;
+  const ua = navigator.userAgent || "";
+  const mobileUa = /Android|iPhone|iPad|iPod|IEMobile|Opera Mini|Mobile/i.test(ua);
+  const iPadDesktopMode =
+    navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1;
+
+  return mobileUa || iPadDesktopMode;
+}
+
+function showInstallMessage(message) {
+  const box = $("installMessage");
+  if (!box) return;
+
+  box.textContent = message;
+  box.classList.remove("hidden");
+
+  window.clearTimeout(showInstallMessage.timer);
+  showInstallMessage.timer =
+    window.setTimeout(() => box.classList.add("hidden"), 7000);
 }
 
 async function installApp() {
-  if (isStandaloneMode()) {
-    $("installAppButton").hidden = true;
-    return;
-  }
+  if (isStandalone()) return;
 
   if (deferredInstallPrompt) {
     deferredInstallPrompt.prompt();
-    await deferredInstallPrompt.userChoice;
+    const result = await deferredInstallPrompt.userChoice;
     deferredInstallPrompt = null;
-    updateInstallButton();
+
+    if (result.outcome === "accepted") {
+      markAppInstalled();
+      $("installCard").classList.add("hidden");
+    }
     return;
   }
 
-  $("iosInstallHelp").classList.toggle("hidden", !isIOSDevice());
-  $("genericInstallHelp").classList.toggle("hidden", isIOSDevice());
-  $("installHelpDialog").showModal();
+  if (isIOS()) {
+    showInstallMessage(
+      "Sur iPhone/iPad : ouvre cette page dans Safari, touche Partager, puis « Sur l’écran d’accueil »."
+    );
+  } else {
+    showInstallMessage(
+      "Si l’installation ne s’ouvre pas, utilise le menu du navigateur puis « Installer l’application » ou « Ajouter à l’écran d’accueil »."
+    );
+  }
 }
 
-function setupInstallExperience() {
-  updateInstallButton();
-  syncAuthCardMode();
+function initPWA() {
+  const installCard = $("installCard");
+  const installButton = $("installButton");
+  const mobile = isMobileDevice();
+
+  if (!installCard || !installButton) return;
+
+  if (isStandalone()) {
+    markAppInstalled();
+  }
+
+  const alreadyInstalled = isStandalone() || isAppMarkedInstalled();
+
+  if (!mobile || alreadyInstalled) {
+    installCard.classList.add("hidden");
+  } else {
+    installCard.classList.remove("hidden");
+  }
 
   window.addEventListener("beforeinstallprompt", event => {
     event.preventDefault();
     deferredInstallPrompt = event;
-    updateInstallButton();
+
+    if (mobile && !isStandalone() && !isAppMarkedInstalled()) {
+      installCard.classList.remove("hidden");
+      installButton.classList.remove("hidden");
+    }
   });
+
+  const standaloneMedia = window.matchMedia("(display-mode: standalone)");
+  const handleDisplayModeChange = () => {
+    if (isStandalone()) {
+      markAppInstalled();
+      installCard.classList.add("hidden");
+    }
+  };
+
+  if (standaloneMedia.addEventListener) {
+    standaloneMedia.addEventListener("change", handleDisplayModeChange);
+  }
 
   window.addEventListener("appinstalled", () => {
     deferredInstallPrompt = null;
-    updateInstallButton();
+    markAppInstalled();
+    installCard.classList.add("hidden");
   });
 
-  window.matchMedia("(display-mode: standalone)").addEventListener?.("change", updateInstallButton);
-  window.addEventListener("resize", () => {
-    updateInstallButton();
-    syncAuthCardMode();
-  });
-}
-
-async function registerServiceWorker() {
-  if (!("serviceWorker" in navigator)) return;
-
-  try {
-    await navigator.serviceWorker.register("./service-worker.js", { scope: "./" });
-  } catch (error) {
-    console.warn("Service worker non enregistré :", error);
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", async () => {
+      try {
+        const registration =
+          await navigator.serviceWorker.register("./service-worker.js");
+        await registration.update();
+      } catch (error) {
+        console.warn("Service worker non enregistré :", error);
+      }
+    });
   }
 }
 
 
 function bind() {
+  $("installButton").addEventListener("click", installApp);
+  $("authToggleButton").addEventListener("click", toggleMobileAuthCard);
   $("loginForm").addEventListener("submit", login);
-  $("installAppButton").addEventListener("click", installApp);
-  $("mobileAuthToggle").addEventListener("click", toggleMobileAuthCard);
-  $("closeInstallHelpDialog").addEventListener("click", () => $("installHelpDialog").close());
   $("logoutButton").addEventListener("click", logout);
 
   $("addParcelButton").addEventListener("click", openParcelDialog);
@@ -759,7 +782,7 @@ function bind() {
 
   $("exportCsvButton").addEventListener("click", exportCsv);
 
-  [$("parcelDialog"), $("observationDialog"), $("installHelpDialog")].forEach(dialog => {
+  [$("parcelDialog"), $("observationDialog")].forEach(dialog => {
     dialog.addEventListener("click", e => {
       if (e.target === dialog) dialog.close();
     });
@@ -768,7 +791,6 @@ function bind() {
 
 document.addEventListener("DOMContentLoaded", async () => {
   bind();
-  setupInstallExperience();
-  await registerServiceWorker();
+  initPWA();
   await init();
 });
