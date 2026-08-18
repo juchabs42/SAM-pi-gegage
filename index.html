@@ -16,7 +16,7 @@
   <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
   <link rel="manifest" href="site.webmanifest">
 
-<link rel="stylesheet" href="style.css?v=20260814-1">
+<link rel="stylesheet" href="style.css?v=20260818-1">
 </head>
 <body>
   <header class="topbar">
@@ -106,6 +106,7 @@
       <label>
         Ravageur
         <select id="pestSelect">
+          <option value="all">Tous les ravageurs</option>
           <option value="carpocapse">Carpocapse</option>
           <option value="punaise_diabolique">Punaise diabolique</option>
           <option value="cicadelle">Cicadelle</option>
@@ -197,8 +198,10 @@
             <tr>
               <th>Date</th>
               <th>Parcelle</th>
+              <th>Ravageur</th>
               <th>Captures</th>
               <th>Enregistré le</th>
+              <th id="historyActionHeader" class="hidden">Action</th>
             </tr>
           </thead>
           <tbody id="historyBody"></tbody>
@@ -285,7 +288,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-  <script src="config.js?v=20260814-1"></script>
-  <script src="app.js?v=20260814-1"></script>
+  <script src="config.js?v=20260818-1"></script>
+  <script src="app.js?v=20260818-1"></script>
 </body>
 </html>

@@ -657,3 +657,34 @@ footer p { margin: 0; }
     grid-column: auto;
   }
 }
+
+
+/* Historique — suppression des relevés */
+.history-action-cell {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.delete-row-button {
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid #e1a8b7;
+  border-radius: 9px;
+  color: #9d1639;
+  background: #fff5f7;
+  font-size: .78rem;
+  font-weight: 800;
+}
+
+.delete-row-button:hover {
+  border-color: var(--brand);
+  color: #fff;
+  background: var(--brand);
+}
+
+@media (max-width: 720px) {
+  .delete-row-button {
+    width: 100%;
+    min-height: 42px;
+  }
+}

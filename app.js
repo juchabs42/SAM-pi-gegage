@@ -73,9 +73,14 @@ function renderAuth() {
   $("editActions").hidden = !connected;
   $("connectedEmail").textContent = currentUser?.email || "";
 
+  const actionHeader = $("historyActionHeader");
+  if (actionHeader) actionHeader.classList.toggle("hidden", !connected);
+
   if (!connected) {
     $("loginPassword").value = "";
   }
+
+  renderHistory();
 }
 
 async function login(event) {
@@ -255,7 +260,11 @@ function activeObservations() {
   const year = $("yearSelect").value;
 
   return observations
-    .filter(o => ids.has(o.parcel_id) && o.pest === pest && o.observed_on.startsWith(year))
+    .filter(o =>
+      ids.has(o.parcel_id) &&
+      (pest === "all" || o.pest === pest) &&
+      o.observed_on.startsWith(year)
+    )
     .sort((a, b) => a.observed_on.localeCompare(b.observed_on) || a.created_at.localeCompare(b.created_at));
 }
 
@@ -280,12 +289,39 @@ function buildParcelSeries() {
   const mode = $("calculationSelect").value;
   const pest = $("pestSelect").value;
   const year = $("yearSelect").value;
+  const parcelsToShow = activeParcels();
 
-  return activeParcels().map(parcel => {
+  if (pest === "all") {
+    return parcelsToShow.flatMap(parcel =>
+      Object.keys(PESTS).map(pestKey => {
+        const records = observations.filter(
+          o =>
+            o.parcel_id === parcel.id &&
+            o.pest === pestKey &&
+            o.observed_on.startsWith(year)
+        );
+
+        return {
+          parcel,
+          pest: pestKey,
+          label: `${parcel.name} — ${PESTS[pestKey]}`,
+          points: aggregateParcelRecords(records, mode)
+        };
+      })
+    ).filter(series => series.points.length);
+  }
+
+  return parcelsToShow.map(parcel => {
     const records = observations.filter(
       o => o.parcel_id === parcel.id && o.pest === pest && o.observed_on.startsWith(year)
     );
-    return { parcel, points: aggregateParcelRecords(records, mode) };
+
+    return {
+      parcel,
+      pest,
+      label: parcel.name,
+      points: aggregateParcelRecords(records, mode)
+    };
   }).filter(series => series.points.length);
 }
 
@@ -377,7 +413,7 @@ function renderChart() {
     const points = display === "cumulative" ? cumulativePoints(s.points) : s.points;
     const map = new Map(points.map(p => [p.date, p.value]));
     return {
-      label: s.parcel.name,
+      label: s.label || s.parcel.name,
       data: allDates.map(date => map.has(date) ? map.get(date) : null),
       borderColor: COLORS[index % COLORS.length],
       backgroundColor: COLORS[index % COLORS.length],
@@ -389,9 +425,12 @@ function renderChart() {
     };
   });
 
+  const selectedPest = $("pestSelect").value;
+  const pestLabel = selectedPest === "all" ? "Tous les ravageurs" : PESTS[selectedPest];
+
   $("chartTitle").textContent = display === "cumulative"
-    ? `Cumul saisonnier — ${PESTS[$("pestSelect").value]}`
-    : `Dynamique des captures — ${PESTS[$("pestSelect").value]}`;
+    ? `Cumul saisonnier — ${pestLabel}`
+    : `Dynamique des captures — ${pestLabel}`;
 
   chart = new Chart(canvas, {
     type: "line",
@@ -429,33 +468,94 @@ function renderChart() {
 
 function renderHistory() {
   const tbody = $("historyBody");
+  if (!tbody) return;
+
   tbody.innerHTML = "";
   const records = activeObservations().slice().sort(
     (a, b) => b.observed_on.localeCompare(a.observed_on) || b.created_at.localeCompare(a.created_at)
   );
 
+  const connected = Boolean(currentUser);
+  const actionHeader = $("historyActionHeader");
+  if (actionHeader) actionHeader.classList.toggle("hidden", !connected);
+
   if (!records.length) {
     const row = document.createElement("tr");
     row.className = "empty-row";
-    row.innerHTML = '<td colspan="4">Aucun relevé enregistré pour cette sélection.</td>';
+    row.innerHTML = `<td colspan="${connected ? 6 : 5}">Aucun relevé enregistré pour cette sélection.</td>`;
     tbody.appendChild(row);
     return;
   }
 
   const parcelMap = new Map(parcels.map(p => [p.id, p.name]));
-  records.forEach(r => {
+
+  records.forEach(record => {
     const row = document.createElement("tr");
-    const labels = ["Date", "Parcelle", "Captures", "Enregistré"];
-    [formatDate(r.observed_on), parcelMap.get(r.parcel_id) || "—", formatNumber(r.captures, 0), formatDateTime(r.created_at)]
-      .forEach((text, i) => {
-        const td = document.createElement("td");
-        td.textContent = text;
-        td.dataset.label = labels[i];
-        if (i === 2) td.style.fontWeight = "800";
-        row.appendChild(td);
-      });
+
+    const values = [
+      ["Date", formatDate(record.observed_on)],
+      ["Parcelle", parcelMap.get(record.parcel_id) || "—"],
+      ["Ravageur", PESTS[record.pest] || record.pest],
+      ["Captures", formatNumber(record.captures, 0)],
+      ["Enregistré", formatDateTime(record.created_at)]
+    ];
+
+    values.forEach(([label, text], index) => {
+      const td = document.createElement("td");
+      td.textContent = text;
+      td.dataset.label = label;
+      if (index === 3) td.style.fontWeight = "800";
+      row.appendChild(td);
+    });
+
+    if (connected) {
+      const actionCell = document.createElement("td");
+      actionCell.dataset.label = "Action";
+      actionCell.className = "history-action-cell";
+
+      const deleteButton = document.createElement("button");
+      deleteButton.type = "button";
+      deleteButton.className = "delete-row-button";
+      deleteButton.textContent = "Supprimer";
+      deleteButton.addEventListener("click", () => deleteObservation(record.id));
+
+      actionCell.appendChild(deleteButton);
+      row.appendChild(actionCell);
+    }
+
     tbody.appendChild(row);
   });
+}
+
+async function deleteObservation(id) {
+  if (!currentUser) return;
+
+  const confirmed = window.confirm("Supprimer définitivement ce relevé ?");
+  if (!confirmed) return;
+
+  const { error } = await db
+    .from("piegeage_observations")
+    .delete()
+    .eq("id", id);
+
+  if (error) {
+    setMessage(
+      $("globalMessage"),
+      `Suppression impossible : ${error.message}`,
+      true
+    );
+    return;
+  }
+
+  observations = observations.filter(record => record.id !== id);
+  refresh();
+  setMessage($("globalMessage"), "Relevé supprimé.");
+
+  window.setTimeout(() => {
+    if ($("globalMessage").textContent === "Relevé supprimé.") {
+      setMessage($("globalMessage"));
+    }
+  }, 3000);
 }
 
 async function createParcel(event) {
@@ -598,7 +698,9 @@ function openObservationDialog() {
   const currentFarm = $("farmSelect").value;
   const currentParcel = $("parcelSelect").value;
   populateEntryFarms(currentFarm, currentParcel !== "all" ? currentParcel : null);
-  $("entryPest").value = $("pestSelect").value;
+  $("entryPest").value = $("pestSelect").value === "all"
+    ? "carpocapse"
+    : $("pestSelect").value;
   $("observationDate").value = new Date().toISOString().slice(0, 10);
   $("observationDialog").showModal();
 }
