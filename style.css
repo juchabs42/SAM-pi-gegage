@@ -737,3 +737,101 @@ footer p { margin: 0; }
     background: #fffaf0 !important;
   }
 }
+
+
+/* Gestion des parcelles */
+.parcel-management {
+  padding: 10px 21px 22px;
+  border-top: 1px solid var(--line);
+}
+
+.parcel-management-header {
+  margin-bottom: 10px;
+}
+
+.parcel-management-header h3 {
+  margin: 3px 0 0;
+  font-size: 1.05rem;
+}
+
+.parcel-list {
+  display: grid;
+  gap: 9px;
+}
+
+.parcel-list-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: #fbfcfd;
+}
+
+.parcel-list-item.pending-parcel {
+  border-color: #efd59c;
+  background: #fffaf0;
+}
+
+.parcel-list-info {
+  min-width: 0;
+}
+
+.parcel-list-info strong,
+.parcel-list-info span {
+  display: block;
+}
+
+.parcel-list-info strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.parcel-list-info span {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: .78rem;
+}
+
+.delete-parcel-button {
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid #e1a8b7;
+  border-radius: 9px;
+  color: #9d1639;
+  background: #fff5f7;
+  font-size: .78rem;
+  font-weight: 800;
+}
+
+.delete-parcel-button:hover {
+  border-color: var(--brand);
+  color: #fff;
+  background: var(--brand);
+}
+
+.parcel-list-empty {
+  padding: 15px;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  color: var(--muted);
+  text-align: center;
+}
+
+@media (max-width: 720px) {
+  .parcel-management {
+    padding: 10px 14px 18px;
+  }
+
+  .parcel-list-item {
+    grid-template-columns: 1fr;
+  }
+
+  .delete-parcel-button {
+    width: 100%;
+    min-height: 42px;
+  }
+}

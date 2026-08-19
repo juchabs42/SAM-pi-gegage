@@ -16,7 +16,7 @@
   <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
   <link rel="manifest" href="site.webmanifest">
 
-<link rel="stylesheet" href="style.css?v=20260819-1">
+<link rel="stylesheet" href="style.css?v=20260819-2">
 </head>
 <body>
   <header class="topbar">
@@ -240,6 +240,16 @@
       <button class="primary-button full-span" type="submit">Créer la parcelle</button>
     </form>
     <div id="parcelMessage" class="form-message" role="status"></div>
+
+    <div class="parcel-management">
+      <div class="parcel-management-header">
+        <div>
+          <p class="panel-kicker">Gestion</p>
+          <h3>Parcelles existantes</h3>
+        </div>
+      </div>
+      <div id="parcelList" class="parcel-list"></div>
+    </div>
   </dialog>
 
   <dialog id="observationDialog" class="app-dialog">
@@ -289,7 +299,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-  <script src="config.js?v=20260819-1"></script>
-  <script src="app.js?v=20260819-1"></script>
+  <script src="config.js?v=20260819-2"></script>
+  <script src="app.js?v=20260819-2"></script>
 </body>
 </html>

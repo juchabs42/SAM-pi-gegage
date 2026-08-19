@@ -15,11 +15,13 @@ let observations = [];
 let chart = null;
 let deferredInstallPrompt = null;
 let pendingObservations = [];
+let pendingParcels = [];
 let syncInProgress = false;
 
 const OFFLINE_DB_NAME = "sam-piegeage-offline";
-const OFFLINE_DB_VERSION = 1;
+const OFFLINE_DB_VERSION = 2;
 const OFFLINE_STORE_PENDING = "pending_observations";
+const OFFLINE_STORE_PENDING_PARCELS = "pending_parcels";
 const OFFLINE_STORE_CACHE = "cache";
 const INSTALL_STORAGE_KEY = "samPiegeageInstalled";
 
@@ -54,6 +56,10 @@ function openOfflineDb() {
 
       if (!database.objectStoreNames.contains(OFFLINE_STORE_PENDING)) {
         database.createObjectStore(OFFLINE_STORE_PENDING, { keyPath: "id" });
+      }
+
+      if (!database.objectStoreNames.contains(OFFLINE_STORE_PENDING_PARCELS)) {
+        database.createObjectStore(OFFLINE_STORE_PENDING_PARCELS, { keyPath: "id" });
       }
 
       if (!database.objectStoreNames.contains(OFFLINE_STORE_CACHE)) {
@@ -140,6 +146,130 @@ async function loadPendingObservations() {
   }
 }
 
+
+async function loadPendingParcels() {
+  try {
+    const rows = await idbGetAll(OFFLINE_STORE_PENDING_PARCELS);
+    pendingParcels = rows
+      .filter(row => !currentUser || row.created_by === currentUser.id)
+      .sort((a, b) =>
+        a.exploitation.localeCompare(b.exploitation, "fr") ||
+        a.name.localeCompare(b.name, "fr")
+      );
+  } catch (error) {
+    console.warn("Parcelles locales en attente non disponibles :", error);
+    pendingParcels = [];
+  }
+}
+
+function displayParcels() {
+  const remoteIds = new Set(parcels.map(parcel => parcel.id));
+
+  return [
+    ...parcels,
+    ...pendingParcels.filter(parcel => !remoteIds.has(parcel.id))
+  ];
+}
+
+function createOfflineParcel({ exploitation, name, variety, area }) {
+  return {
+    id: crypto.randomUUID(),
+    exploitation,
+    name,
+    variety,
+    area_ha: area,
+    created_by: currentUser.id,
+    created_at: new Date().toISOString(),
+    _pending: true
+  };
+}
+
+async function queueParcel(parcel) {
+  await idbPut(OFFLINE_STORE_PENDING_PARCELS, parcel);
+  pendingParcels.push(parcel);
+  pendingParcels.sort((a, b) =>
+    a.exploitation.localeCompare(b.exploitation, "fr") ||
+    a.name.localeCompare(b.name, "fr")
+  );
+  updateSyncStatus();
+}
+
+async function removePendingParcel(id) {
+  await idbDelete(OFFLINE_STORE_PENDING_PARCELS, id);
+  pendingParcels = pendingParcels.filter(parcel => parcel.id !== id);
+  updateSyncStatus();
+}
+
+async function remapPendingObservations(oldParcelId, newParcelId) {
+  const affected = pendingObservations.filter(record => record.parcel_id === oldParcelId);
+
+  for (const record of affected) {
+    record.parcel_id = newParcelId;
+    await idbPut(OFFLINE_STORE_PENDING, record);
+  }
+}
+
+async function syncPendingParcels() {
+  if (!navigator.onLine || !currentUser || !pendingParcels.length) return 0;
+
+  let synced = 0;
+  const queue = pendingParcels.slice();
+
+  for (const parcel of queue) {
+    if (parcel.created_by !== currentUser.id) continue;
+
+    const payload = {
+      id: parcel.id,
+      exploitation: parcel.exploitation,
+      name: parcel.name,
+      variety: parcel.variety,
+      area_ha: parcel.area_ha,
+      created_by: parcel.created_by
+    };
+
+    const { data, error } = await db
+      .from("piegeage_parcels")
+      .insert(payload)
+      .select("id, exploitation, name, variety, area_ha, created_by, created_at")
+      .single();
+
+    if (!error) {
+      await removePendingParcel(parcel.id);
+      if (!parcels.some(item => item.id === data.id)) parcels.push(data);
+      synced += 1;
+      continue;
+    }
+
+    if (error.code === "23505") {
+      const { data: existing, error: lookupError } = await db
+        .from("piegeage_parcels")
+        .select("id, exploitation, name, variety, area_ha, created_by, created_at")
+        .eq("exploitation", parcel.exploitation)
+        .eq("name", parcel.name)
+        .maybeSingle();
+
+      if (!lookupError && existing) {
+        await remapPendingObservations(parcel.id, existing.id);
+        await removePendingParcel(parcel.id);
+        if (!parcels.some(item => item.id === existing.id)) parcels.push(existing);
+        synced += 1;
+        continue;
+      }
+    }
+
+    if (isNetworkError(error)) break;
+
+    console.warn("Parcelle non synchronisée :", error);
+  }
+
+  parcels.sort((a, b) =>
+    a.exploitation.localeCompare(b.exploitation, "fr") ||
+    a.name.localeCompare(b.name, "fr")
+  );
+
+  return synced;
+}
+
 function displayObservations() {
   const remoteIds = new Set(observations.map(record => record.id));
 
@@ -168,39 +298,52 @@ function updateSyncStatus(message = null, mode = null) {
     return;
   }
 
-  const count = pendingObservations.length;
+  const parcelCount = pendingParcels.length;
+  const observationCount = pendingObservations.length;
+  const total = parcelCount + observationCount;
+
+  const parts = [];
+  if (parcelCount) {
+    parts.push(`${parcelCount} parcelle${parcelCount > 1 ? "s" : ""}`);
+  }
+  if (observationCount) {
+    parts.push(`${observationCount} relevé${observationCount > 1 ? "s" : ""}`);
+  }
 
   if (!navigator.onLine) {
-    box.textContent = count
-      ? `Hors connexion — ${count} relevé${count > 1 ? "s" : ""} en attente`
+    box.textContent = total
+      ? `Hors connexion — ${parts.join(" · ")} en attente`
       : "Hors connexion";
     box.classList.add("offline");
     return;
   }
 
-  if (count) {
-    box.textContent = `${count} relevé${count > 1 ? "s" : ""} en attente de synchronisation`;
+  if (total) {
+    box.textContent = `${parts.join(" · ")} en attente de synchronisation`;
     box.classList.add("syncing");
     return;
   }
 
   box.classList.add("hidden");
 }
+function showSyncSuccess(parcelCount, observationCount) {
+  const parts = [];
 
-function showSyncSuccess(count) {
-  if (!count) {
+  if (parcelCount) {
+    parts.push(`${parcelCount} parcelle${parcelCount > 1 ? "s" : ""}`);
+  }
+  if (observationCount) {
+    parts.push(`${observationCount} relevé${observationCount > 1 ? "s" : ""}`);
+  }
+
+  if (!parts.length) {
     updateSyncStatus();
     return;
   }
 
-  updateSyncStatus(
-    `${count} relevé${count > 1 ? "s" : ""} synchronisé${count > 1 ? "s" : ""}`,
-    "success"
-  );
-
+  updateSyncStatus(`${parts.join(" · ")} synchronisé${parcelCount + observationCount > 1 ? "s" : ""}`, "success");
   window.setTimeout(() => updateSyncStatus(), 3500);
 }
-
 function createOfflineObservation({ parcelId, pest, date, captures }) {
   const id = crypto.randomUUID();
 
@@ -233,16 +376,7 @@ async function removePendingObservation(id) {
 }
 
 async function syncPendingObservations() {
-  if (syncInProgress || !navigator.onLine || !currentUser || !pendingObservations.length) {
-    updateSyncStatus();
-    return;
-  }
-
-  syncInProgress = true;
-  updateSyncStatus(
-    `Synchronisation de ${pendingObservations.length} relevé${pendingObservations.length > 1 ? "s" : ""}…`,
-    "syncing"
-  );
+  if (!navigator.onLine || !currentUser || !pendingObservations.length) return 0;
 
   let synced = 0;
   const queue = pendingObservations.slice();
@@ -276,23 +410,51 @@ async function syncPendingObservations() {
       continue;
     }
 
-    if (isNetworkError(error)) {
-      break;
-    }
+    if (isNetworkError(error)) break;
 
     console.warn("Relevé non synchronisé :", error);
   }
 
+  observations.sort((a, b) =>
+    a.observed_on.localeCompare(b.observed_on) ||
+    a.created_at.localeCompare(b.created_at)
+  );
+
+  return synced;
+}
+
+async function syncPendingData() {
+  if (syncInProgress || !navigator.onLine || !currentUser) {
+    updateSyncStatus();
+    return;
+  }
+
+  if (!pendingParcels.length && !pendingObservations.length) {
+    updateSyncStatus();
+    return;
+  }
+
+  syncInProgress = true;
+
+  const parts = [];
+  if (pendingParcels.length) parts.push(`${pendingParcels.length} parcelle${pendingParcels.length > 1 ? "s" : ""}`);
+  if (pendingObservations.length) parts.push(`${pendingObservations.length} relevé${pendingObservations.length > 1 ? "s" : ""}`);
+
+  updateSyncStatus(`Synchronisation de ${parts.join(" · ")}…`, "syncing");
+
+  const syncedParcels = await syncPendingParcels();
+  const syncedObservations = await syncPendingObservations();
+
   syncInProgress = false;
 
-  if (synced) {
-    observations.sort((a, b) =>
-      a.observed_on.localeCompare(b.observed_on) ||
-      a.created_at.localeCompare(b.created_at)
-    );
+  if (syncedParcels || syncedObservations) {
     await saveCachedData();
+    populateYears();
+    populateFarms();
+    populateEntryFarms();
+    renderParcelList();
     refresh();
-    showSyncSuccess(synced);
+    showSyncSuccess(syncedParcels, syncedObservations);
   } else {
     updateSyncStatus();
   }
@@ -316,16 +478,18 @@ async function init() {
 
   const { data: { session } } = await db.auth.getSession();
   currentUser = session?.user || null;
+  await loadPendingParcels();
   await loadPendingObservations();
   renderAuth();
 
   db.auth.onAuthStateChange(async (_event, session) => {
     currentUser = session?.user || null;
+    await loadPendingParcels();
     await loadPendingObservations();
     renderAuth();
 
     if (currentUser && navigator.onLine) {
-      await syncPendingObservations();
+      await syncPendingData();
     }
   });
 
@@ -397,6 +561,7 @@ async function loadData() {
   if (!navigator.onLine && cached) {
     parcels = cached.parcels || [];
     observations = cached.observations || [];
+    await loadPendingParcels();
     await loadPendingObservations();
 
     populateYears();
@@ -423,6 +588,7 @@ async function loadData() {
     if (cached && (isNetworkError(p.error) || isNetworkError(o.error))) {
       parcels = cached.parcels || [];
       observations = cached.observations || [];
+      await loadPendingParcels();
       await loadPendingObservations();
 
       populateYears();
@@ -445,6 +611,7 @@ async function loadData() {
 
   parcels = p.data || [];
   observations = o.data || [];
+  await loadPendingParcels();
   await loadPendingObservations();
   await saveCachedData();
 
@@ -455,8 +622,8 @@ async function loadData() {
   setMessage($("globalMessage"));
   updateSyncStatus();
 
-  if (currentUser && pendingObservations.length) {
-    await syncPendingObservations();
+  if (currentUser && (pendingParcels.length || pendingObservations.length)) {
+    await syncPendingData();
   }
 }
 
@@ -475,7 +642,7 @@ function populateYears(preferred = null) {
 function populateFarms(preferred = null) {
   const select = $("farmSelect");
   const previous = preferred || select.value;
-  const farms = [...new Set(parcels.map(p => p.exploitation))].sort((a, b) => a.localeCompare(b, "fr"));
+  const farms = [...new Set(displayParcels().map(p => p.exploitation))].sort((a, b) => a.localeCompare(b, "fr"));
 
   select.innerHTML = "";
   if (!farms.length) {
@@ -495,7 +662,7 @@ function populateParcelFilter(preferred = null) {
   const select = $("parcelSelect");
   const farm = $("farmSelect").value;
   const previous = preferred || select.value;
-  const list = parcels
+  const list = displayParcels()
     .filter(p => p.exploitation === farm)
     .sort((a, b) => a.name.localeCompare(b.name, "fr"));
 
@@ -514,7 +681,7 @@ function populateParcelFilter(preferred = null) {
 
 function populateEntryFarms(preferredFarm = null, preferredParcel = null) {
   const select = $("entryFarm");
-  const farms = [...new Set(parcels.map(p => p.exploitation))].sort((a, b) => a.localeCompare(b, "fr"));
+  const farms = [...new Set(displayParcels().map(p => p.exploitation))].sort((a, b) => a.localeCompare(b, "fr"));
   const previous = preferredFarm || select.value;
 
   select.innerHTML = "";
@@ -534,7 +701,7 @@ function populateEntryFarms(preferredFarm = null, preferredParcel = null) {
 function populateEntryParcels(preferred = null) {
   const select = $("entryParcel");
   const farm = $("entryFarm").value;
-  const list = parcels
+  const list = displayParcels()
     .filter(p => p.exploitation === farm)
     .sort((a, b) => a.name.localeCompare(b.name, "fr"));
 
@@ -553,7 +720,7 @@ function populateEntryParcels(preferred = null) {
 function activeParcels() {
   const farm = $("farmSelect").value;
   const parcelValue = $("parcelSelect").value;
-  const farmParcels = parcels.filter(p => p.exploitation === farm);
+  const farmParcels = displayParcels().filter(p => p.exploitation === farm);
   return parcelValue === "all"
     ? farmParcels
     : farmParcels.filter(p => p.id === parcelValue);
@@ -792,7 +959,7 @@ function renderHistory() {
     return;
   }
 
-  const parcelMap = new Map(parcels.map(p => [p.id, p.name]));
+  const parcelMap = new Map(displayParcels().map(p => [p.id, p.name]));
 
   records.forEach(record => {
     const row = document.createElement("tr");
@@ -882,6 +1049,7 @@ async function createParcel(event) {
   if (!currentUser) return;
 
   setMessage($("parcelMessage"));
+
   const exploitation = $("parcelFarm").value.trim();
   const name = $("parcelName").value.trim();
   const variety = $("parcelVariety").value.trim();
@@ -892,33 +1060,77 @@ async function createParcel(event) {
     return;
   }
 
-  const { data, error } = await db.from("piegeage_parcels")
-    .insert({
-      exploitation,
-      name,
-      variety,
-      area_ha: area,
-      created_by: currentUser.id
-    })
-    .select("id, exploitation, name, variety, area_ha, created_by, created_at")
-    .single();
+  const duplicate = displayParcels().some(parcel =>
+    parcel.exploitation.trim().toLowerCase() === exploitation.toLowerCase() &&
+    parcel.name.trim().toLowerCase() === name.toLowerCase()
+  );
 
-  if (error) {
-    setMessage(
-      $("parcelMessage"),
-      error.code === "23505" ? "Cette parcelle existe déjà pour cette exploitation." : `Création impossible : ${error.message}`,
-      true
-    );
+  if (duplicate) {
+    setMessage($("parcelMessage"), "Cette parcelle existe déjà pour cette exploitation.", true);
     return;
   }
 
-  parcels.push(data);
+  const localParcel = createOfflineParcel({
+    exploitation,
+    name,
+    variety,
+    area
+  });
+
+  let savedOnline = false;
+  let savedParcel = localParcel;
+
+  if (navigator.onLine) {
+    const { data, error } = await db
+      .from("piegeage_parcels")
+      .insert({
+        id: localParcel.id,
+        exploitation: localParcel.exploitation,
+        name: localParcel.name,
+        variety: localParcel.variety,
+        area_ha: localParcel.area_ha,
+        created_by: localParcel.created_by
+      })
+      .select("id, exploitation, name, variety, area_ha, created_by, created_at")
+      .single();
+
+    if (!error) {
+      parcels.push(data);
+      savedOnline = true;
+      savedParcel = data;
+      await saveCachedData();
+    } else if (!isNetworkError(error)) {
+      setMessage(
+        $("parcelMessage"),
+        error.code === "23505"
+          ? "Cette parcelle existe déjà pour cette exploitation."
+          : `Création impossible : ${error.message}`,
+        true
+      );
+      return;
+    }
+  }
+
+  if (!savedOnline) {
+    await queueParcel(localParcel);
+  }
+
   $("parcelForm").reset();
-  populateFarms(data.exploitation);
-  populateEntryFarms(data.exploitation, data.id);
-  $("parcelSelect").value = data.id;
+
+  populateFarms(savedParcel.exploitation);
+  populateEntryFarms(savedParcel.exploitation, savedParcel.id);
+  $("parcelSelect").value = savedParcel.id;
+  renderParcelList();
   refresh();
-  setMessage($("parcelMessage"), "Parcelle créée.");
+
+  setMessage(
+    $("parcelMessage"),
+    savedOnline
+      ? "Parcelle créée."
+      : "Parcelle créée hors connexion. Elle sera synchronisée automatiquement."
+  );
+
+  updateSyncStatus();
 }
 
 async function createObservation(event) {
@@ -984,7 +1196,7 @@ async function createObservation(event) {
 
   populateYears(date.slice(0, 4));
 
-  const parcel = parcels.find(p => p.id === parcelId);
+  const parcel = displayParcels().find(p => p.id === parcelId);
   if (parcel) {
     populateFarms(parcel.exploitation);
     $("parcelSelect").value = parcel.id;
@@ -1010,7 +1222,7 @@ async function createObservation(event) {
 
 function exportCsv() {
   const records = activeObservations();
-  const parcelMap = new Map(parcels.map(p => [p.id, p]));
+  const parcelMap = new Map(displayParcels().map(p => [p.id, p]));
   const rows = [["Ravageur", "Année", "Exploitation", "Parcelle", "Variété", "Surface (ha)", "Date du relevé", "Captures"]];
 
   records.forEach(r => {
@@ -1039,9 +1251,132 @@ function exportCsv() {
   URL.revokeObjectURL(url);
 }
 
+
+function renderParcelList() {
+  const container = $("parcelList");
+  if (!container) return;
+
+  container.innerHTML = "";
+
+  const list = displayParcels().slice().sort((a, b) =>
+    a.exploitation.localeCompare(b.exploitation, "fr") ||
+    a.name.localeCompare(b.name, "fr")
+  );
+
+  if (!list.length) {
+    const empty = document.createElement("div");
+    empty.className = "parcel-list-empty";
+    empty.textContent = "Aucune parcelle créée.";
+    container.appendChild(empty);
+    return;
+  }
+
+  list.forEach(parcel => {
+    const row = document.createElement("div");
+    row.className = "parcel-list-item";
+    if (parcel._pending) row.classList.add("pending-parcel");
+
+    const info = document.createElement("div");
+    info.className = "parcel-list-info";
+
+    const title = document.createElement("strong");
+    title.textContent = `${parcel.exploitation} — ${parcel.name}`;
+
+    const meta = document.createElement("span");
+    meta.textContent = `${parcel.variety} · ${formatNumber(parcel.area_ha, 2)} ha${parcel._pending ? " · En attente de synchronisation" : ""}`;
+
+    info.append(title, meta);
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "delete-parcel-button";
+    button.textContent = "Supprimer";
+    button.addEventListener("click", () => deleteParcel(parcel));
+
+    row.append(info, button);
+    container.appendChild(row);
+  });
+}
+
+async function deleteParcel(parcel) {
+  if (!currentUser) return;
+
+  const linkedObservations = displayObservations().filter(
+    record => record.parcel_id === parcel.id
+  );
+
+  const warning = linkedObservations.length
+    ? `Supprimer la parcelle « ${parcel.name} » et ses ${linkedObservations.length} relevé${linkedObservations.length > 1 ? "s" : ""} ?`
+    : `Supprimer la parcelle « ${parcel.name} » ?`;
+
+  if (!window.confirm(warning)) return;
+
+  if (parcel._pending) {
+    const pendingForParcel = pendingObservations.filter(
+      record => record.parcel_id === parcel.id
+    );
+
+    for (const record of pendingForParcel) {
+      await removePendingObservation(record.id);
+    }
+
+    await removePendingParcel(parcel.id);
+
+    populateFarms();
+    populateEntryFarms();
+    renderParcelList();
+    refresh();
+    setMessage($("parcelMessage"), "Parcelle supprimée.");
+    return;
+  }
+
+  if (!navigator.onLine) {
+    setMessage(
+      $("parcelMessage"),
+      "La suppression d’une parcelle déjà synchronisée nécessite une connexion internet.",
+      true
+    );
+    return;
+  }
+
+  const { error } = await db
+    .from("piegeage_parcels")
+    .delete()
+    .eq("id", parcel.id);
+
+  if (error) {
+    setMessage(
+      $("parcelMessage"),
+      `Suppression impossible : ${error.message}`,
+      true
+    );
+    return;
+  }
+
+  parcels = parcels.filter(item => item.id !== parcel.id);
+  observations = observations.filter(record => record.parcel_id !== parcel.id);
+
+  const pendingForParcel = pendingObservations.filter(
+    record => record.parcel_id === parcel.id
+  );
+  for (const record of pendingForParcel) {
+    await removePendingObservation(record.id);
+  }
+
+  await saveCachedData();
+
+  populateFarms();
+  populateEntryFarms();
+  renderParcelList();
+  refresh();
+
+  setMessage($("parcelMessage"), "Parcelle supprimée.");
+}
+
 function openParcelDialog() {
   if (!currentUser) return;
   setMessage($("parcelMessage"));
+  renderParcelList();
   $("parcelDialog").showModal();
 }
 
@@ -1049,7 +1384,7 @@ function openObservationDialog() {
   if (!currentUser) return;
   setMessage($("observationMessage"));
 
-  if (!parcels.length) {
+  if (!displayParcels().length) {
     setMessage($("globalMessage"), "Créez d’abord une parcelle.", true);
     return;
   }
@@ -1249,7 +1584,7 @@ function bind() {
 
   window.addEventListener("online", async () => {
     updateSyncStatus("Connexion retrouvée — synchronisation…", "syncing");
-    await syncPendingObservations();
+    await syncPendingData();
     await loadData();
   });
 
