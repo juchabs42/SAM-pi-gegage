@@ -688,3 +688,52 @@ footer p { margin: 0; }
     min-height: 42px;
   }
 }
+
+
+/* Synchronisation hors connexion */
+.sync-status {
+  margin: -2px 0 12px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  font-size: .82rem;
+  font-weight: 800;
+}
+
+.sync-status.offline {
+  color: #7a571b;
+  background: #fff3d8;
+  border: 1px solid #efd59c;
+}
+
+.sync-status.syncing {
+  color: #315f74;
+  background: #e9f4f8;
+  border: 1px solid #c8e0ea;
+}
+
+.sync-status.success {
+  color: #1f6f4f;
+  background: #e8f5ee;
+  border: 1px solid #c9e7d7;
+}
+
+.pending-row {
+  background: #fffaf0;
+}
+
+.pending-row td:nth-last-child(2) {
+  color: #8c5a11;
+  font-weight: 800;
+}
+
+@media (max-width: 720px) {
+  .sync-status {
+    margin-bottom: 10px;
+    font-size: .78rem;
+  }
+
+  .pending-row {
+    border-color: #efd59c !important;
+    background: #fffaf0 !important;
+  }
+}

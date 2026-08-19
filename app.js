@@ -14,6 +14,13 @@ let parcels = [];
 let observations = [];
 let chart = null;
 let deferredInstallPrompt = null;
+let pendingObservations = [];
+let syncInProgress = false;
+
+const OFFLINE_DB_NAME = "sam-piegeage-offline";
+const OFFLINE_DB_VERSION = 1;
+const OFFLINE_STORE_PENDING = "pending_observations";
+const OFFLINE_STORE_CACHE = "cache";
 const INSTALL_STORAGE_KEY = "samPiegeageInstalled";
 
 const $ = (id) => document.getElementById(id);
@@ -37,6 +44,260 @@ function formatNumber(value, digits = 1) {
   return new Intl.NumberFormat("fr-FR", { maximumFractionDigits: digits }).format(value);
 }
 
+
+function openOfflineDb() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(OFFLINE_DB_NAME, OFFLINE_DB_VERSION);
+
+    request.onupgradeneeded = () => {
+      const database = request.result;
+
+      if (!database.objectStoreNames.contains(OFFLINE_STORE_PENDING)) {
+        database.createObjectStore(OFFLINE_STORE_PENDING, { keyPath: "id" });
+      }
+
+      if (!database.objectStoreNames.contains(OFFLINE_STORE_CACHE)) {
+        database.createObjectStore(OFFLINE_STORE_CACHE, { keyPath: "key" });
+      }
+    };
+
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function idbGetAll(storeName) {
+  const database = await openOfflineDb();
+
+  return new Promise((resolve, reject) => {
+    const tx = database.transaction(storeName, "readonly");
+    const request = tx.objectStore(storeName).getAll();
+
+    request.onsuccess = () => resolve(request.result || []);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function idbPut(storeName, value) {
+  const database = await openOfflineDb();
+
+  return new Promise((resolve, reject) => {
+    const tx = database.transaction(storeName, "readwrite");
+    tx.objectStore(storeName).put(value);
+
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function idbDelete(storeName, key) {
+  const database = await openOfflineDb();
+
+  return new Promise((resolve, reject) => {
+    const tx = database.transaction(storeName, "readwrite");
+    tx.objectStore(storeName).delete(key);
+
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function saveCachedData() {
+  try {
+    await idbPut(OFFLINE_STORE_CACHE, {
+      key: "dataset",
+      parcels,
+      observations,
+      saved_at: new Date().toISOString()
+    });
+  } catch (error) {
+    console.warn("Cache local non enregistré :", error);
+  }
+}
+
+async function loadCachedData() {
+  try {
+    const rows = await idbGetAll(OFFLINE_STORE_CACHE);
+    return rows.find(row => row.key === "dataset") || null;
+  } catch (error) {
+    console.warn("Cache local non disponible :", error);
+    return null;
+  }
+}
+
+async function loadPendingObservations() {
+  try {
+    const rows = await idbGetAll(OFFLINE_STORE_PENDING);
+    pendingObservations = rows
+      .filter(row => !currentUser || row.created_by === currentUser.id)
+      .sort((a, b) =>
+        a.observed_on.localeCompare(b.observed_on) ||
+        a.created_at.localeCompare(b.created_at)
+      );
+  } catch (error) {
+    console.warn("File d'attente locale non disponible :", error);
+    pendingObservations = [];
+  }
+}
+
+function displayObservations() {
+  const remoteIds = new Set(observations.map(record => record.id));
+
+  return [
+    ...observations,
+    ...pendingObservations.filter(record => !remoteIds.has(record.id))
+  ];
+}
+
+function isNetworkError(error) {
+  if (!navigator.onLine) return true;
+
+  const message = String(error?.message || error || "");
+  return /failed to fetch|network|load failed|fetch failed|networkerror/i.test(message);
+}
+
+function updateSyncStatus(message = null, mode = null) {
+  const box = $("syncStatus");
+  if (!box) return;
+
+  box.classList.remove("hidden", "offline", "syncing", "success");
+
+  if (message) {
+    box.textContent = message;
+    if (mode) box.classList.add(mode);
+    return;
+  }
+
+  const count = pendingObservations.length;
+
+  if (!navigator.onLine) {
+    box.textContent = count
+      ? `Hors connexion — ${count} relevé${count > 1 ? "s" : ""} en attente`
+      : "Hors connexion";
+    box.classList.add("offline");
+    return;
+  }
+
+  if (count) {
+    box.textContent = `${count} relevé${count > 1 ? "s" : ""} en attente de synchronisation`;
+    box.classList.add("syncing");
+    return;
+  }
+
+  box.classList.add("hidden");
+}
+
+function showSyncSuccess(count) {
+  if (!count) {
+    updateSyncStatus();
+    return;
+  }
+
+  updateSyncStatus(
+    `${count} relevé${count > 1 ? "s" : ""} synchronisé${count > 1 ? "s" : ""}`,
+    "success"
+  );
+
+  window.setTimeout(() => updateSyncStatus(), 3500);
+}
+
+function createOfflineObservation({ parcelId, pest, date, captures }) {
+  const id = crypto.randomUUID();
+
+  return {
+    id,
+    parcel_id: parcelId,
+    pest,
+    observed_on: date,
+    captures,
+    created_by: currentUser.id,
+    created_at: new Date().toISOString(),
+    _pending: true
+  };
+}
+
+async function queueObservation(record) {
+  await idbPut(OFFLINE_STORE_PENDING, record);
+  pendingObservations.push(record);
+  pendingObservations.sort((a, b) =>
+    a.observed_on.localeCompare(b.observed_on) ||
+    a.created_at.localeCompare(b.created_at)
+  );
+  updateSyncStatus();
+}
+
+async function removePendingObservation(id) {
+  await idbDelete(OFFLINE_STORE_PENDING, id);
+  pendingObservations = pendingObservations.filter(record => record.id !== id);
+  updateSyncStatus();
+}
+
+async function syncPendingObservations() {
+  if (syncInProgress || !navigator.onLine || !currentUser || !pendingObservations.length) {
+    updateSyncStatus();
+    return;
+  }
+
+  syncInProgress = true;
+  updateSyncStatus(
+    `Synchronisation de ${pendingObservations.length} relevé${pendingObservations.length > 1 ? "s" : ""}…`,
+    "syncing"
+  );
+
+  let synced = 0;
+  const queue = pendingObservations.slice();
+
+  for (const record of queue) {
+    if (record.created_by !== currentUser.id) continue;
+
+    const payload = {
+      id: record.id,
+      parcel_id: record.parcel_id,
+      pest: record.pest,
+      observed_on: record.observed_on,
+      captures: record.captures,
+      created_by: record.created_by
+    };
+
+    const { data, error } = await db
+      .from("piegeage_observations")
+      .insert(payload)
+      .select("id, parcel_id, pest, observed_on, captures, created_by, created_at")
+      .single();
+
+    if (!error || error.code === "23505") {
+      await removePendingObservation(record.id);
+
+      if (data && !observations.some(item => item.id === data.id)) {
+        observations.push(data);
+      }
+
+      synced += 1;
+      continue;
+    }
+
+    if (isNetworkError(error)) {
+      break;
+    }
+
+    console.warn("Relevé non synchronisé :", error);
+  }
+
+  syncInProgress = false;
+
+  if (synced) {
+    observations.sort((a, b) =>
+      a.observed_on.localeCompare(b.observed_on) ||
+      a.created_at.localeCompare(b.created_at)
+    );
+    await saveCachedData();
+    refresh();
+    showSyncSuccess(synced);
+  } else {
+    updateSyncStatus();
+  }
+}
+
 function configReady() {
   const c = window.SAM_CONFIG || {};
   return Boolean(c.SUPABASE_URL && c.SUPABASE_ANON_KEY);
@@ -55,11 +316,17 @@ async function init() {
 
   const { data: { session } } = await db.auth.getSession();
   currentUser = session?.user || null;
+  await loadPendingObservations();
   renderAuth();
 
-  db.auth.onAuthStateChange((_event, session) => {
+  db.auth.onAuthStateChange(async (_event, session) => {
     currentUser = session?.user || null;
+    await loadPendingObservations();
     renderAuth();
+
+    if (currentUser && navigator.onLine) {
+      await syncPendingObservations();
+    }
   });
 
   await loadData();
@@ -125,6 +392,22 @@ async function logout() {
 async function loadData() {
   setMessage($("globalMessage"), "Chargement…");
 
+  const cached = await loadCachedData();
+
+  if (!navigator.onLine && cached) {
+    parcels = cached.parcels || [];
+    observations = cached.observations || [];
+    await loadPendingObservations();
+
+    populateYears();
+    populateFarms();
+    populateEntryFarms();
+    refresh();
+    setMessage($("globalMessage"));
+    updateSyncStatus();
+    return;
+  }
+
   const [p, o] = await Promise.all([
     db.from("piegeage_parcels")
       .select("id, exploitation, name, variety, area_ha, created_by, created_at")
@@ -137,29 +420,51 @@ async function loadData() {
   ]);
 
   if (p.error || o.error) {
+    if (cached && (isNetworkError(p.error) || isNetworkError(o.error))) {
+      parcels = cached.parcels || [];
+      observations = cached.observations || [];
+      await loadPendingObservations();
+
+      populateYears();
+      populateFarms();
+      populateEntryFarms();
+      refresh();
+      setMessage($("globalMessage"));
+      updateSyncStatus();
+      return;
+    }
+
     setMessage(
       $("globalMessage"),
       `Impossible de charger les données : ${p.error?.message || o.error?.message}`,
       true
     );
+    updateSyncStatus();
     return;
   }
 
   parcels = p.data || [];
   observations = o.data || [];
+  await loadPendingObservations();
+  await saveCachedData();
 
   populateYears();
   populateFarms();
   populateEntryFarms();
   refresh();
   setMessage($("globalMessage"));
+  updateSyncStatus();
+
+  if (currentUser && pendingObservations.length) {
+    await syncPendingObservations();
+  }
 }
 
 function populateYears(preferred = null) {
   const select = $("yearSelect");
   const current = String(new Date().getFullYear());
   const previous = preferred || select.value;
-  const years = [...new Set([current, ...observations.map(o => o.observed_on.slice(0, 4))])]
+  const years = [...new Set([current, ...displayObservations().map(o => o.observed_on.slice(0, 4))])]
     .sort((a, b) => b.localeCompare(a));
 
   select.innerHTML = "";
@@ -259,7 +564,7 @@ function activeObservations() {
   const pest = $("pestSelect").value;
   const year = $("yearSelect").value;
 
-  return observations
+  return displayObservations()
     .filter(o =>
       ids.has(o.parcel_id) &&
       (pest === "all" || o.pest === pest) &&
@@ -294,7 +599,7 @@ function buildParcelSeries() {
   if (pest === "all") {
     return parcelsToShow.flatMap(parcel =>
       Object.keys(PESTS).map(pestKey => {
-        const records = observations.filter(
+        const records = displayObservations().filter(
           o =>
             o.parcel_id === parcel.id &&
             o.pest === pestKey &&
@@ -312,7 +617,7 @@ function buildParcelSeries() {
   }
 
   return parcelsToShow.map(parcel => {
-    const records = observations.filter(
+    const records = displayObservations().filter(
       o => o.parcel_id === parcel.id && o.pest === pest && o.observed_on.startsWith(year)
     );
 
@@ -491,13 +796,14 @@ function renderHistory() {
 
   records.forEach(record => {
     const row = document.createElement("tr");
+    if (record._pending) row.classList.add("pending-row");
 
     const values = [
       ["Date", formatDate(record.observed_on)],
       ["Parcelle", parcelMap.get(record.parcel_id) || "—"],
       ["Ravageur", PESTS[record.pest] || record.pest],
       ["Captures", formatNumber(record.captures, 0)],
-      ["Enregistré", formatDateTime(record.created_at)]
+      ["Enregistré", record._pending ? "En attente de synchronisation" : formatDateTime(record.created_at)]
     ];
 
     values.forEach(([label, text], index) => {
@@ -517,7 +823,7 @@ function renderHistory() {
       deleteButton.type = "button";
       deleteButton.className = "delete-row-button";
       deleteButton.textContent = "Supprimer";
-      deleteButton.addEventListener("click", () => deleteObservation(record.id));
+      deleteButton.addEventListener("click", () => deleteObservation(record));
 
       actionCell.appendChild(deleteButton);
       row.appendChild(actionCell);
@@ -527,16 +833,28 @@ function renderHistory() {
   });
 }
 
-async function deleteObservation(id) {
+async function deleteObservation(record) {
   if (!currentUser) return;
 
-  const confirmed = window.confirm("Supprimer définitivement ce relevé ?");
+  const confirmed = window.confirm(
+    record._pending
+      ? "Supprimer ce relevé en attente de synchronisation ?"
+      : "Supprimer définitivement ce relevé ?"
+  );
+
   if (!confirmed) return;
+
+  if (record._pending) {
+    await removePendingObservation(record.id);
+    refresh();
+    setMessage($("globalMessage"), "Relevé supprimé.");
+    return;
+  }
 
   const { error } = await db
     .from("piegeage_observations")
     .delete()
-    .eq("id", id);
+    .eq("id", record.id);
 
   if (error) {
     setMessage(
@@ -547,7 +865,8 @@ async function deleteObservation(id) {
     return;
   }
 
-  observations = observations.filter(record => record.id !== id);
+  observations = observations.filter(item => item.id !== record.id);
+  await saveCachedData();
   refresh();
   setMessage($("globalMessage"), "Relevé supprimé.");
 
@@ -607,6 +926,7 @@ async function createObservation(event) {
   if (!currentUser) return;
 
   setMessage($("observationMessage"));
+
   const parcelId = $("entryParcel").value;
   const pest = $("entryPest").value;
   const date = $("observationDate").value;
@@ -617,23 +937,51 @@ async function createObservation(event) {
     return;
   }
 
-  const { data, error } = await db.from("piegeage_observations")
-    .insert({
-      parcel_id: parcelId,
-      pest,
-      observed_on: date,
-      captures,
-      created_by: currentUser.id
-    })
-    .select("id, parcel_id, pest, observed_on, captures, created_by, created_at")
-    .single();
+  const localRecord = createOfflineObservation({
+    parcelId,
+    pest,
+    date,
+    captures
+  });
 
-  if (error) {
-    setMessage($("observationMessage"), `Enregistrement impossible : ${error.message}`, true);
-    return;
+  let savedOnline = false;
+
+  if (navigator.onLine) {
+    const { data, error } = await db
+      .from("piegeage_observations")
+      .insert({
+        id: localRecord.id,
+        parcel_id: localRecord.parcel_id,
+        pest: localRecord.pest,
+        observed_on: localRecord.observed_on,
+        captures: localRecord.captures,
+        created_by: localRecord.created_by
+      })
+      .select("id, parcel_id, pest, observed_on, captures, created_by, created_at")
+      .single();
+
+    if (!error) {
+      observations.push(data);
+      observations.sort((a, b) =>
+        a.observed_on.localeCompare(b.observed_on) ||
+        a.created_at.localeCompare(b.created_at)
+      );
+      savedOnline = true;
+      await saveCachedData();
+    } else if (!isNetworkError(error)) {
+      setMessage(
+        $("observationMessage"),
+        `Enregistrement impossible : ${error.message}`,
+        true
+      );
+      return;
+    }
   }
 
-  observations.push(data);
+  if (!savedOnline) {
+    await queueObservation(localRecord);
+  }
+
   populateYears(date.slice(0, 4));
 
   const parcel = parcels.find(p => p.id === parcelId);
@@ -641,12 +989,23 @@ async function createObservation(event) {
     populateFarms(parcel.exploitation);
     $("parcelSelect").value = parcel.id;
   }
+
   $("pestSelect").value = pest;
   $("yearSelect").value = date.slice(0, 4);
-
   $("observationCount").value = "";
+
   refresh();
-  setMessage($("observationMessage"), "Relevé enregistré.");
+
+  setMessage(
+    $("observationMessage"),
+    savedOnline
+      ? "Relevé enregistré."
+      : "Relevé enregistré hors connexion. Il sera synchronisé automatiquement."
+  );
+
+  if (!savedOnline) {
+    updateSyncStatus();
+  }
 }
 
 function exportCsv() {
@@ -884,6 +1243,16 @@ function bind() {
 
   $("exportCsvButton").addEventListener("click", exportCsv);
 
+  window.addEventListener("offline", () => {
+    updateSyncStatus();
+  });
+
+  window.addEventListener("online", async () => {
+    updateSyncStatus("Connexion retrouvée — synchronisation…", "syncing");
+    await syncPendingObservations();
+    await loadData();
+  });
+
   [$("parcelDialog"), $("observationDialog")].forEach(dialog => {
     dialog.addEventListener("click", e => {
       if (e.target === dialog) dialog.close();
@@ -894,5 +1263,6 @@ function bind() {
 document.addEventListener("DOMContentLoaded", async () => {
   bind();
   initPWA();
+  updateSyncStatus();
   await init();
 });
