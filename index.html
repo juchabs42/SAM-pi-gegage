@@ -3,20 +3,19 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="theme-color" content="#d31145">
+  <meta name="description" content="SAM Piégeage — suivi des réseaux de pièges, identifications et interventions.">
+  <meta name="theme-color" content="#d31145">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="SAM Piégeage">
-<meta name="description" content="SAM Piégeage — suivi partagé des captures de ravageurs par parcelle.">
-<title>SAM Piégeage</title>
+  <title>SAM Piégeage</title>
   <link rel="icon" href="favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
   <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
   <link rel="manifest" href="site.webmanifest">
-
-<link rel="stylesheet" href="style.css?v=20260819-2">
+  <link rel="stylesheet" href="style.css?v=20260916-v2">
 </head>
 <body>
   <header class="topbar">
@@ -33,273 +32,230 @@
       </div>
     </div>
 
-    <button id="authToggleButton" class="auth-toggle-button mobile-only" type="button"
-            aria-expanded="false" aria-controls="authCard" aria-label="Afficher la connexion">
+    <button id="authToggleButton" class="auth-toggle-button mobile-only" type="button" aria-expanded="false" aria-controls="authCard" aria-label="Afficher la connexion">
       <img src="bouton-connexion.png" alt="" class="auth-toggle-icon" aria-hidden="true">
     </button>
 
     <div id="authCard" class="auth-card" aria-label="Connexion">
       <p class="auth-card-title mobile-only">Connexion</p>
-
       <form id="loginForm" class="auth-form">
-        <input id="loginEmail" type="email" autocomplete="username"
-               placeholder="Adresse mail" aria-label="Adresse mail" required>
-        <input id="loginPassword" type="password" autocomplete="current-password"
-               placeholder="Mot de passe" aria-label="Mot de passe" required>
+        <input id="loginEmail" type="email" autocomplete="username" placeholder="Adresse mail" aria-label="Adresse mail" required>
+        <input id="loginPassword" type="password" autocomplete="current-password" placeholder="Mot de passe" aria-label="Mot de passe" required>
         <button class="auth-button" type="submit">Connexion</button>
       </form>
-
       <div id="connectedBlock" class="connected-block hidden">
         <div>
-          <span class="connected-label">Connecté</span>
+          <span class="connected-label">Administrateur</span>
           <strong id="connectedEmail"></strong>
         </div>
-        <button id="logoutButton" class="logout-button" type="button"
-                title="Se déconnecter" aria-label="Se déconnecter">↪</button>
+        <button id="logoutButton" class="logout-button" type="button" title="Se déconnecter" aria-label="Se déconnecter">↪</button>
       </div>
-
       <p id="loginMessage" class="auth-message" role="status"></p>
     </div>
   </header>
 
   <main>
-    <section class="section-heading">
+    <section class="hero panel">
       <div>
         <p class="eyebrow">Réseau de piégeage SudExpé</p>
-        <h2>Suivi des piégeages ravageurs</h2>
-        <p>Visualisez les captures par exploitation et par parcelle. La saisie et la création de parcelles sont réservées aux utilisateurs connectés.</p>
+        <h2>Suivi des pièges, identifications et interventions</h2>
+        <p class="hero-text">Lecture publique des résultats. Les campagnes, parcelles, pièges, relevés et interventions sont gérés par les comptes administrateurs.</p>
       </div>
-
-      <div class="heading-actions">
-<div id="editActions" class="edit-actions" hidden>
-          <button id="addParcelButton" class="primary-button action-button" type="button">+ Créer une parcelle</button>
-          <button id="addObservationButton" class="secondary-button action-button" type="button">+ Ajouter un relevé</button>
-        </div>
+      <div id="adminActions" class="admin-actions hidden">
+        <button class="primary-button" id="newObservationButton" type="button">+ Relevé</button>
+        <button class="secondary-button" id="newInterventionButton" type="button">+ Intervention</button>
+        <button class="secondary-button" id="newTrapButton" type="button">+ Piège</button>
+        <button class="secondary-button" id="newParcelButton" type="button">+ Parcelle</button>
+        <button class="secondary-button" id="newCampaignButton" type="button">+ Campagne</button>
+        <button class="secondary-button" id="speciesButton" type="button">Espèces</button>
+        <button class="secondary-button" id="archivesButton" type="button">Archives</button>
       </div>
     </section>
-    <section id="installCard" class="panel install-panel mobile-only hidden"
-             aria-label="Installer l'application">
+
+    <section id="installCard" class="panel install-panel mobile-only hidden" aria-label="Installer l'application">
       <div class="install-panel-header">
-        <div class="install-panel-logo-wrap">
-          <img src="logo-sam-piegeage.png" alt="Logo SAM Piégeage" class="install-panel-logo">
-        </div>
+        <div class="install-panel-logo-wrap"><img src="logo-sam-piegeage.png" alt="Logo SAM Piégeage" class="install-panel-logo"></div>
         <div>
           <p class="panel-kicker">Application</p>
           <h3>Installer l'application</h3>
-          <p class="install-panel-text">
-            Ajoute SAM Piégeage sur l’écran d’accueil pour l’utiliser plus facilement sur téléphone.
-          </p>
+          <p class="install-panel-text">Ajoute SAM Piégeage sur l’écran d’accueil pour l’utiliser plus facilement sur le terrain.</p>
         </div>
       </div>
-      <div class="install-panel-actions">
-        <button id="installButton" class="primary-button install-card-button" type="button">
-          Installer l’application
-        </button>
-      </div>
+      <div class="install-panel-actions"><button id="installButton" class="primary-button install-card-button" type="button">Installer l’application</button></div>
       <div id="installMessage" class="install-inline-message hidden" role="status"></div>
     </section>
-
 
     <div id="globalMessage" class="global-message" role="status"></div>
     <div id="syncStatus" class="sync-status hidden" role="status"></div>
 
-    <section class="controls" aria-label="Filtres">
-      <label>
-        Ravageur
-        <select id="pestSelect">
-          <option value="all">Tous les ravageurs</option>
-          <option value="carpocapse">Carpocapse</option>
-          <option value="punaise_diabolique">Punaise diabolique</option>
-          <option value="cicadelle">Cicadelle</option>
-          <option value="mouche_mediterraneenne">Mouche méditerranéenne</option>
-          <option value="tordeuse">Tordeuse</option>
-        </select>
-      </label>
-
-      <label>
-        Année
-        <select id="yearSelect"></select>
-      </label>
-
-      <label>
-        Exploitation
-        <select id="farmSelect"></select>
-      </label>
-
-      <label>
-        Parcelle
-        <select id="parcelSelect"></select>
-      </label>
-
-      <label>
-        Calcul
-        <select id="calculationSelect">
-          <option value="total">Total des captures</option>
-          <option value="average">Moyenne des captures</option>
-        </select>
-      </label>
-
-      <label>
-        Affichage
-        <select id="displaySelect">
-          <option value="records">Captures par relevé</option>
-          <option value="cumulative">Cumul saisonnier</option>
-        </select>
-      </label>
-
-      <button id="exportCsvButton" class="secondary-button control-button" type="button">Exporter CSV</button>
+    <section class="panel filter-panel">
+      <div class="filter-grid">
+        <label>Campagne<select id="campaignFilter"></select></label>
+        <label>Parcelle<select id="parcelFilter"></select></label>
+        <label>Piège<select id="trapFilter"></select></label>
+        <label>Donnée<select id="speciesFilter"></select></label>
+        <label>Sexe<select id="sexFilter"><option value="all">Tous</option><option value="male">Mâles</option><option value="female">Femelles</option><option value="undetermined">Indéterminés</option></select></label>
+        <label>Unité<select id="unitFilter"><option value="raw">Captures brutes</option><option value="per_day">Captures / jour</option></select></label>
+        <label>Courbe<select id="processingFilter"><option value="observed">Valeurs observées</option><option value="weekly">Total hebdomadaire</option><option value="smoothed">Lissage Bertrand</option></select></label>
+        <button id="exportExcelButton" class="secondary-button export-button" type="button">Exporter Excel</button>
+      </div>
     </section>
 
-    <div class="metric-grid">
-      <article class="metric-card">
-        <p>Dernier relevé</p>
-        <strong id="lastValue">—</strong>
-        <span id="lastDate">Aucune donnée</span>
-      </article>
-      <article class="metric-card">
-        <p>Tendance</p>
-        <strong id="trendValue">—</strong>
-        <span>Comparaison avec les relevés précédents</span>
-      </article>
-      <article class="metric-card">
-        <p>Cumul saisonnier</p>
-        <strong id="seasonTotal">—</strong>
-        <span id="seasonUnit">captures</span>
-      </article>
-      <article class="metric-card">
-        <p>Nombre de relevés</p>
-        <strong id="recordCount">0</strong>
-        <span id="lastUpdate">Aucune mise à jour</span>
-      </article>
-    </div>
+    <section class="metric-grid">
+      <article class="metric-card"><p>Dernier relevé</p><strong id="lastValue">—</strong><span id="lastDate">Aucune donnée</span></article>
+      <article class="metric-card"><p>Cumul</p><strong id="seasonTotal">—</strong><span id="seasonUnit">captures</span></article>
+      <article class="metric-card"><p>Identification</p><strong id="identificationValue">—</strong><span id="identificationText">—</span></article>
+      <article class="metric-card"><p>Nombre de relevés</p><strong id="recordCount">0</strong><span id="recordPeriod">—</span></article>
+    </section>
 
-    <article class="panel">
+    <section class="panel">
       <div class="panel-header">
-        <div>
-          <p class="panel-kicker">Dynamique saisonnière</p>
-          <h3 id="chartTitle">Captures par relevé</h3>
-        </div>
+        <div><p class="panel-kicker">Dynamique saisonnière</p><h3 id="chartTitle">Captures</h3></div>
+        <div id="campaignSummary" class="campaign-summary"></div>
       </div>
-      <div id="chartEmpty" class="empty-state">Aucune donnée pour cette sélection.</div>
-      <div class="chart-wrap large">
-        <canvas id="trapChart" aria-label="Graphique des captures de ravageurs"></canvas>
-      </div>
-    </article>
+      <div id="chartEmpty" class="empty-state hidden">Aucune donnée pour cette sélection.</div>
+      <div class="chart-wrap"><canvas id="trapChart" aria-label="Graphique des captures"></canvas></div>
+      <div id="eventLegend" class="event-legend"></div>
+    </section>
 
-    <article class="panel">
-      <div class="panel-header">
-        <div>
-          <p class="panel-kicker">Historique</p>
-          <h3>Relevés enregistrés</h3>
-        </div>
-      </div>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Parcelle</th>
-              <th>Ravageur</th>
-              <th>Captures</th>
-              <th>Enregistré le</th>
-              <th id="historyActionHeader" class="hidden">Action</th>
-            </tr>
-          </thead>
-          <tbody id="historyBody"></tbody>
-        </table>
-      </div>
-    </article>
+    <section class="panel">
+      <div class="panel-header"><div><p class="panel-kicker">Historique</p><h3>Relevés enregistrés</h3></div></div>
+      <div id="historyList" class="history-list"></div>
+    </section>
   </main>
 
-  <dialog id="parcelDialog" class="app-dialog">
-    <div class="dialog-header">
-      <div>
-        <p class="panel-kicker">Parcelle</p>
-        <h2>Créer une parcelle</h2>
-      </div>
-      <button id="closeParcelDialog" class="close-button" type="button" aria-label="Fermer">×</button>
-    </div>
-
-    <form id="parcelForm" class="dialog-form">
-      <label>
-        Exploitation
-        <input id="parcelFarm" type="text" maxlength="100" required>
-      </label>
-      <label>
-        Parcelle
-        <input id="parcelName" type="text" maxlength="100" required>
-      </label>
-      <label>
-        Variété
-        <input id="parcelVariety" type="text" maxlength="100" required>
-      </label>
-      <label>
-        Surface (ha)
-        <input id="parcelArea" type="number" min="0" step="0.01" required>
-      </label>
-      <button class="primary-button full-span" type="submit">Créer la parcelle</button>
+  <!-- CAMPAGNE -->
+  <dialog id="campaignDialog" class="app-dialog wide-dialog">
+    <div class="dialog-header"><div><p class="panel-kicker">Administration</p><h2>Campagnes</h2></div><button class="close-button" data-close="campaignDialog" type="button">×</button></div>
+    <form id="campaignForm" class="dialog-form two-cols">
+      <input id="campaignId" type="hidden">
+      <label>Nom de la campagne<input id="campaignName" type="text" placeholder="Ex. Pucerons Marsillargues 2026" required></label>
+      <label>Année<input id="campaignYear" type="number" min="2000" max="2100" required></label>
+      <label>Ravageur / groupe suivi<input id="campaignPest" type="text" placeholder="Ex. Pucerons" required></label>
+      <label>Protocole<select id="campaignProtocol"><option value="simple">Simple — nombre de captures</option><option value="aphid">Pucerons — espèces + M/F/indéterminés</option></select></label>
+      <label>Date de début<input id="campaignStart" type="date"></label>
+      <label>Date de fin<input id="campaignEnd" type="date"></label>
+      <div id="campaignSpeciesSection" class="full-span species-choice-section hidden"><span class="field-label">Espèces suivies</span><div id="campaignSpeciesChoices" class="checkbox-grid"></div></div>
+      <button class="primary-button full-span" type="submit">Enregistrer la campagne</button>
     </form>
-    <div id="parcelMessage" class="form-message" role="status"></div>
-
-    <div class="parcel-management">
-      <div class="parcel-management-header">
-        <div>
-          <p class="panel-kicker">Gestion</p>
-          <h3>Parcelles existantes</h3>
-        </div>
-      </div>
-      <div id="parcelList" class="parcel-list"></div>
-    </div>
+    <div id="campaignMessage" class="form-message"></div>
+    <div class="management-section"><h3>Campagnes existantes</h3><div id="campaignManageList" class="management-list"></div></div>
   </dialog>
 
-  <dialog id="observationDialog" class="app-dialog">
-    <div class="dialog-header">
-      <div>
-        <p class="panel-kicker">Parcelle</p>
-        <h2>Ajouter un relevé</h2>
-      </div>
-      <button id="closeObservationDialog" class="close-button" type="button" aria-label="Fermer">×</button>
-    </div>
+  <!-- PARCELLE -->
+  <dialog id="parcelDialog" class="app-dialog wide-dialog">
+    <div class="dialog-header"><div><p class="panel-kicker">Administration</p><h2>Parcelles</h2></div><button class="close-button" data-close="parcelDialog" type="button">×</button></div>
+    <form id="parcelForm" class="dialog-form two-cols">
+      <input id="parcelId" type="hidden">
+      <label>Exploitation<input id="parcelFarm" type="text" required></label>
+      <label>Parcelle<input id="parcelName" type="text" required></label>
+      <label>Variété<input id="parcelVariety" type="text" required></label>
+      <label>Surface (ha)<input id="parcelArea" type="number" min="0" step="0.01" required></label>
+      <button class="primary-button full-span" type="submit">Enregistrer la parcelle</button>
+    </form>
+    <div id="parcelMessage" class="form-message"></div>
+    <div class="management-section"><h3>Parcelles existantes</h3><div id="parcelManageList" class="management-list"></div></div>
+  </dialog>
 
-    <form id="observationForm" class="dialog-form">
-      <label>
-        Exploitation
-        <select id="entryFarm" required></select>
-      </label>
-      <label>
-        Parcelle
-        <select id="entryParcel" required></select>
-      </label>
-      <label>
-        Ravageur
-        <select id="entryPest" required>
-          <option value="carpocapse">Carpocapse</option>
-          <option value="punaise_diabolique">Punaise diabolique</option>
-          <option value="cicadelle">Cicadelle</option>
-          <option value="mouche_mediterraneenne">Mouche méditerranéenne</option>
-          <option value="tordeuse">Tordeuse</option>
-        </select>
-      </label>
-      <label>
-        Date du relevé
-        <input id="observationDate" type="date" required>
-      </label>
-      <label class="full-span">
-        Nombre de captures
-        <input id="observationCount" type="number" min="0" step="1" inputmode="numeric" required>
-      </label>
+  <!-- PIÈGE -->
+  <dialog id="trapDialog" class="app-dialog wide-dialog">
+    <div class="dialog-header"><div><p class="panel-kicker">Administration</p><h2>Pièges</h2></div><button class="close-button" data-close="trapDialog" type="button">×</button></div>
+    <form id="trapForm" class="dialog-form two-cols">
+      <input id="trapId" type="hidden">
+      <label>Campagne<select id="trapCampaign" required></select></label>
+      <label>Parcelle<select id="trapParcel" required></select></label>
+      <label>Code du piège<input id="trapCode" type="text" placeholder="Ex. L-01" required></label>
+      <label>Type de piège<input id="trapType" type="text" placeholder="Ex. bac jaune"></label>
+      <label>Rang<input id="trapRow" type="text"></label>
+      <label>Position<input id="trapPosition" type="text" placeholder="Ex. Nord / Sud"></label>
+      <label>Date d'installation<input id="trapInstalled" type="date"></label>
+      <label>Attractif / appât<input id="trapAttractant" type="text"></label>
+      <label class="full-span">Commentaire<textarea id="trapComment" rows="2"></textarea></label>
+      <button class="primary-button full-span" type="submit">Enregistrer le piège</button>
+    </form>
+    <div id="trapMessage" class="form-message"></div>
+    <div class="management-section"><h3>Pièges existants</h3><div id="trapManageList" class="management-list"></div></div>
+  </dialog>
+
+  <!-- ÉVÉNEMENT PIÈGE -->
+  <dialog id="trapEventDialog" class="app-dialog">
+    <div class="dialog-header"><div><p class="panel-kicker">Piège</p><h2>Ajouter un événement</h2></div><button class="close-button" data-close="trapEventDialog" type="button">×</button></div>
+    <form id="trapEventForm" class="dialog-form">
+      <label>Piège<select id="eventTrap" required></select></label>
+      <label>Date<input id="eventDate" type="date" required></label>
+      <label>Type<select id="eventType"><option value="replacement">Remplacement du piège</option><option value="attractant">Changement d'attractif / appât</option><option value="move">Déplacement</option><option value="retirement">Retrait</option><option value="other">Autre</option></select></label>
+      <label>Libellé<input id="eventLabel" type="text"></label>
+      <label>Commentaire<textarea id="eventComment" rows="2"></textarea></label>
+      <button class="primary-button" type="submit">Enregistrer l'événement</button>
+    </form>
+    <div id="eventMessage" class="form-message"></div>
+  </dialog>
+
+  <!-- RELEVÉ -->
+  <dialog id="observationDialog" class="app-dialog wide-dialog">
+    <div class="dialog-header"><div><p class="panel-kicker">Terrain</p><h2 id="observationDialogTitle">Ajouter un relevé</h2></div><button class="close-button" data-close="observationDialog" type="button">×</button></div>
+    <form id="observationForm" class="dialog-form two-cols">
+      <input id="observationId" type="hidden">
+      <label>Campagne<select id="observationCampaign" required></select></label>
+      <label>Parcelle<select id="observationParcel" required></select></label>
+      <label>Piège<select id="observationTrap" required></select></label>
+      <label>Date<input id="observationDate" type="date" required></label>
+      <label>Total capturé<input id="observationTotal" type="number" min="0" step="1" required></label>
+      <label class="full-span">Commentaire<textarea id="observationComment" rows="2"></textarea></label>
+      <div id="aphidDetailSection" class="full-span hidden">
+        <div class="identification-header"><div><span class="field-label">Identification des pucerons</span><p>Saisis systématiquement mâles, femelles et indéterminés. Tu peux enregistrer le total puis compléter l'identification plus tard.</p></div><div id="identificationSummary" class="identification-summary">0 identifié · 0 restant</div></div>
+        <div id="aphidSpeciesRows" class="species-detail-list"></div>
+      </div>
       <button class="primary-button full-span" type="submit">Enregistrer le relevé</button>
     </form>
-    <div id="observationMessage" class="form-message" role="status"></div>
+    <div id="observationMessage" class="form-message"></div>
   </dialog>
-<footer>
-    <p>SAM Piégeage — SudExpé</p>
-    <p>Outil de suivi des captures de ravageurs.</p>
-  </footer>
 
+  <!-- INTERVENTION -->
+  <dialog id="interventionDialog" class="app-dialog wide-dialog">
+    <div class="dialog-header"><div><p class="panel-kicker">Événement</p><h2>Ajouter une intervention</h2></div><button class="close-button" data-close="interventionDialog" type="button">×</button></div>
+    <form id="interventionForm" class="dialog-form two-cols">
+      <input id="interventionId" type="hidden">
+      <label>Campagne<select id="interventionCampaign" required></select></label>
+      <label>Date<input id="interventionDate" type="date" required></label>
+      <label>Heure (facultatif)<input id="interventionTime" type="time"></label>
+      <label>Type d'intervention<input id="interventionType" type="text" placeholder="Ex. traitement" required></label>
+      <label>Produit<input id="interventionProduct" type="text"></label>
+      <label>Dose<input id="interventionDose" type="text"></label>
+      <label>Cible<input id="interventionTarget" type="text"></label>
+      <label class="full-span">Parcelles concernées<div id="interventionParcelChoices" class="checkbox-grid"></div></label>
+      <label class="full-span">Commentaire<textarea id="interventionComment" rows="2"></textarea></label>
+      <button class="primary-button full-span" type="submit">Enregistrer l'intervention</button>
+    </form>
+    <div id="interventionMessage" class="form-message"></div>
+  </dialog>
+
+  <!-- ESPÈCES -->
+  <dialog id="speciesDialog" class="app-dialog">
+    <div class="dialog-header"><div><p class="panel-kicker">Référentiel</p><h2>Espèces suivies</h2></div><button class="close-button" data-close="speciesDialog" type="button">×</button></div>
+    <form id="speciesForm" class="dialog-form">
+      <label>Nom scientifique<input id="speciesScientific" type="text" placeholder="Ex. Dysaphis plantaginea" required></label>
+      <label>Nom commun<input id="speciesCommon" type="text"></label>
+      <button class="primary-button" type="submit">Ajouter l'espèce</button>
+    </form>
+    <div id="speciesMessage" class="form-message"></div>
+    <div class="management-section"><div id="speciesManageList" class="management-list"></div></div>
+  </dialog>
+
+  <!-- ARCHIVES -->
+  <dialog id="archivesDialog" class="app-dialog wide-dialog">
+    <div class="dialog-header"><div><p class="panel-kicker">Traçabilité</p><h2>Archives</h2></div><button class="close-button" data-close="archivesDialog" type="button">×</button></div>
+    <div class="management-section"><h3>Relevés archivés</h3><div id="archivedObservationList" class="management-list"></div></div>
+    <div class="management-section"><h3>Interventions archivées</h3><div id="archivedInterventionList" class="management-list"></div></div>
+    <div class="management-section"><h3>Événements de piège archivés</h3><div id="archivedTrapEventList" class="management-list"></div></div>
+  </dialog>
+
+  <footer><p>SAM Piégeage — SudExpé</p><p>Outil de suivi des réseaux de pièges</p></footer>
+
+  <script src="config.js?v=20260916-v2"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-  <script src="config.js?v=20260819-2"></script>
-  <script src="app.js?v=20260819-2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="app.js?v=20260916-v2"></script>
 </body>
 </html>

@@ -1,72 +1,103 @@
-const PESTS = {
-  carpocapse: "Carpocapse",
-  punaise_diabolique: "Punaise diabolique",
-  cicadelle: "Cicadelle",
-  mouche_mediterraneenne: "Mouche méditerranéenne",
-  tordeuse: "Tordeuse"
+const TABLES = {
+  species: "piegeage_species",
+  campaigns: "piegeage_campaigns",
+  campaignSpecies: "piegeage_campaign_species",
+  parcels: "piegeage_parcels",
+  campaignParcels: "piegeage_campaign_parcels",
+  traps: "piegeage_traps",
+  trapEvents: "piegeage_trap_events",
+  observations: "piegeage_observations_v2",
+  details: "piegeage_observation_details",
+  interventions: "piegeage_interventions",
+  interventionParcels: "piegeage_intervention_parcels"
 };
 
-const COLORS = ["#D31145", "#31688E", "#2E8B57", "#A56A00", "#744F9C", "#008C95", "#B04A3A", "#58636D"];
+const SYNC_PRIORITY = [
+  TABLES.species,
+  TABLES.campaigns,
+  TABLES.parcels,
+  TABLES.campaignSpecies,
+  TABLES.campaignParcels,
+  TABLES.traps,
+  TABLES.trapEvents,
+  TABLES.observations,
+  TABLES.details,
+  TABLES.interventions,
+  TABLES.interventionParcels
+];
+
+const INSTALL_STORAGE_KEY = "samPiegeageV2Installed";
+const OFFLINE_DB_NAME = "sam-piegeage-v2";
+const OFFLINE_DB_VERSION = 1;
+const OFFLINE_CACHE_STORE = "cache";
+const OFFLINE_QUEUE_STORE = "queue";
 
 let db;
 let currentUser = null;
-let parcels = [];
-let observations = [];
 let chart = null;
 let deferredInstallPrompt = null;
-let pendingObservations = [];
-let pendingParcels = [];
 let syncInProgress = false;
 
-const OFFLINE_DB_NAME = "sam-piegeage-offline";
-const OFFLINE_DB_VERSION = 2;
-const OFFLINE_STORE_PENDING = "pending_observations";
-const OFFLINE_STORE_PENDING_PARCELS = "pending_parcels";
-const OFFLINE_STORE_CACHE = "cache";
-const INSTALL_STORAGE_KEY = "samPiegeageInstalled";
+const data = {
+  species: [], campaigns: [], campaignSpecies: [], parcels: [], campaignParcels: [],
+  traps: [], trapEvents: [], observations: [], details: [], interventions: [], interventionParcels: []
+};
 
-const $ = (id) => document.getElementById(id);
+const $ = id => document.getElementById(id);
+const uuid = () => crypto.randomUUID();
+const todayISO = () => new Date().toISOString().slice(0, 10);
 
-function setMessage(element, message = "", error = false) {
-  element.textContent = message;
-  element.classList.toggle("error", error);
+function setMessage(el, message = "", error = false) {
+  if (!el) return;
+  el.textContent = message;
+  el.classList.toggle("error", error);
 }
 
-function formatDate(iso) {
+function fmtDate(iso) {
   if (!iso) return "—";
   return new Date(`${iso}T12:00:00`).toLocaleDateString("fr-FR");
 }
 
-function formatDateTime(iso) {
+function fmtDateTime(iso) {
   if (!iso) return "—";
   return new Date(iso).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" });
 }
 
-function formatNumber(value, digits = 1) {
-  return new Intl.NumberFormat("fr-FR", { maximumFractionDigits: digits }).format(value);
+function fmtNumber(value, digits = 1) {
+  return new Intl.NumberFormat("fr-FR", { maximumFractionDigits: digits }).format(Number(value || 0));
 }
 
+function slugify(value) {
+  return String(value || "")
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+}
 
+function configReady() {
+  const c = window.SAM_CONFIG || {};
+  return Boolean(c.SUPABASE_URL && c.SUPABASE_ANON_KEY);
+}
+
+function isNetworkError(error) {
+  if (!navigator.onLine) return true;
+  return /failed to fetch|network|load failed|fetch failed|networkerror/i.test(String(error?.message || error || ""));
+}
+
+// -----------------------------------------------------------------------------
+// IndexedDB : cache + file de synchronisation générique
+// -----------------------------------------------------------------------------
 function openOfflineDb() {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(OFFLINE_DB_NAME, OFFLINE_DB_VERSION);
-
     request.onupgradeneeded = () => {
       const database = request.result;
-
-      if (!database.objectStoreNames.contains(OFFLINE_STORE_PENDING)) {
-        database.createObjectStore(OFFLINE_STORE_PENDING, { keyPath: "id" });
+      if (!database.objectStoreNames.contains(OFFLINE_CACHE_STORE)) {
+        database.createObjectStore(OFFLINE_CACHE_STORE, { keyPath: "key" });
       }
-
-      if (!database.objectStoreNames.contains(OFFLINE_STORE_PENDING_PARCELS)) {
-        database.createObjectStore(OFFLINE_STORE_PENDING_PARCELS, { keyPath: "id" });
-      }
-
-      if (!database.objectStoreNames.contains(OFFLINE_STORE_CACHE)) {
-        database.createObjectStore(OFFLINE_STORE_CACHE, { keyPath: "key" });
+      if (!database.objectStoreNames.contains(OFFLINE_QUEUE_STORE)) {
+        database.createObjectStore(OFFLINE_QUEUE_STORE, { keyPath: "key" });
       }
     };
-
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
@@ -74,23 +105,19 @@ function openOfflineDb() {
 
 async function idbGetAll(storeName) {
   const database = await openOfflineDb();
-
   return new Promise((resolve, reject) => {
     const tx = database.transaction(storeName, "readonly");
-    const request = tx.objectStore(storeName).getAll();
-
-    request.onsuccess = () => resolve(request.result || []);
-    request.onerror = () => reject(request.error);
+    const req = tx.objectStore(storeName).getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error);
   });
 }
 
 async function idbPut(storeName, value) {
   const database = await openOfflineDb();
-
   return new Promise((resolve, reject) => {
     const tx = database.transaction(storeName, "readwrite");
     tx.objectStore(storeName).put(value);
-
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });
@@ -98,198 +125,125 @@ async function idbPut(storeName, value) {
 
 async function idbDelete(storeName, key) {
   const database = await openOfflineDb();
-
   return new Promise((resolve, reject) => {
     const tx = database.transaction(storeName, "readwrite");
     tx.objectStore(storeName).delete(key);
-
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });
 }
 
-async function saveCachedData() {
+async function saveCache() {
   try {
-    await idbPut(OFFLINE_STORE_CACHE, {
+    await idbPut(OFFLINE_CACHE_STORE, {
       key: "dataset",
-      parcels,
-      observations,
-      saved_at: new Date().toISOString()
+      saved_at: new Date().toISOString(),
+      data: JSON.parse(JSON.stringify(data))
     });
   } catch (error) {
-    console.warn("Cache local non enregistré :", error);
+    console.warn("Cache local non enregistré", error);
   }
 }
 
-async function loadCachedData() {
+async function loadCache() {
   try {
-    const rows = await idbGetAll(OFFLINE_STORE_CACHE);
-    return rows.find(row => row.key === "dataset") || null;
+    const rows = await idbGetAll(OFFLINE_CACHE_STORE);
+    const cache = rows.find(row => row.key === "dataset");
+    if (!cache?.data) return false;
+    Object.keys(data).forEach(key => { data[key] = cache.data[key] || []; });
+    return true;
   } catch (error) {
-    console.warn("Cache local non disponible :", error);
-    return null;
+    console.warn("Cache local indisponible", error);
+    return false;
   }
 }
 
-async function loadPendingObservations() {
-  try {
-    const rows = await idbGetAll(OFFLINE_STORE_PENDING);
-    pendingObservations = rows
-      .filter(row => !currentUser || row.created_by === currentUser.id)
-      .sort((a, b) =>
-        a.observed_on.localeCompare(b.observed_on) ||
-        a.created_at.localeCompare(b.created_at)
-      );
-  } catch (error) {
-    console.warn("File d'attente locale non disponible :", error);
-    pendingObservations = [];
-  }
-}
-
-
-async function loadPendingParcels() {
-  try {
-    const rows = await idbGetAll(OFFLINE_STORE_PENDING_PARCELS);
-    pendingParcels = rows
-      .filter(row => !currentUser || row.created_by === currentUser.id)
-      .sort((a, b) =>
-        a.exploitation.localeCompare(b.exploitation, "fr") ||
-        a.name.localeCompare(b.name, "fr")
-      );
-  } catch (error) {
-    console.warn("Parcelles locales en attente non disponibles :", error);
-    pendingParcels = [];
-  }
-}
-
-function displayParcels() {
-  const remoteIds = new Set(parcels.map(parcel => parcel.id));
-
-  return [
-    ...parcels,
-    ...pendingParcels.filter(parcel => !remoteIds.has(parcel.id))
-  ];
-}
-
-function createOfflineParcel({ exploitation, name, variety, area }) {
-  return {
-    id: crypto.randomUUID(),
-    exploitation,
-    name,
-    variety,
-    area_ha: area,
-    created_by: currentUser.id,
-    created_at: new Date().toISOString(),
-    _pending: true
-  };
-}
-
-async function queueParcel(parcel) {
-  await idbPut(OFFLINE_STORE_PENDING_PARCELS, parcel);
-  pendingParcels.push(parcel);
-  pendingParcels.sort((a, b) =>
-    a.exploitation.localeCompare(b.exploitation, "fr") ||
-    a.name.localeCompare(b.name, "fr")
-  );
+async function queueRecord(table, payload) {
+  const key = `${table}:${payload.id}`;
+  await idbPut(OFFLINE_QUEUE_STORE, { key, table, payload, saved_at: new Date().toISOString() });
   updateSyncStatus();
 }
 
-async function removePendingParcel(id) {
-  await idbDelete(OFFLINE_STORE_PENDING_PARCELS, id);
-  pendingParcels = pendingParcels.filter(parcel => parcel.id !== id);
-  updateSyncStatus();
+async function pendingQueue() {
+  try { return await idbGetAll(OFFLINE_QUEUE_STORE); }
+  catch { return []; }
 }
 
-async function remapPendingObservations(oldParcelId, newParcelId) {
-  const affected = pendingObservations.filter(record => record.parcel_id === oldParcelId);
-
-  for (const record of affected) {
-    record.parcel_id = newParcelId;
-    await idbPut(OFFLINE_STORE_PENDING, record);
-  }
+function keyForTable(table) {
+  return Object.entries(TABLES).find(([, value]) => value === table)?.[0];
 }
 
-async function syncPendingParcels() {
-  if (!navigator.onLine || !currentUser || !pendingParcels.length) return 0;
+function applyLocal(table, payload) {
+  const key = keyForTable(table);
+  if (!key) return;
+  const list = data[key];
+  const index = list.findIndex(row => row.id === payload.id);
+  if (index >= 0) list[index] = { ...list[index], ...payload, _pending: !navigator.onLine };
+  else list.push({ ...payload, _pending: !navigator.onLine });
+}
 
-  let synced = 0;
-  const queue = pendingParcels.slice();
+function cleanPayload(payload) {
+  return Object.fromEntries(Object.entries(payload).filter(([key]) => !key.startsWith("_")));
+}
 
-  for (const parcel of queue) {
-    if (parcel.created_by !== currentUser.id) continue;
+async function writeRecord(table, payload, options = {}) {
+  payload = cleanPayload(payload);
+  applyLocal(table, payload);
+  await saveCache();
 
-    const payload = {
-      id: parcel.id,
-      exploitation: parcel.exploitation,
-      name: parcel.name,
-      variety: parcel.variety,
-      area_ha: parcel.area_ha,
-      created_by: parcel.created_by
-    };
+  if (!currentUser) throw new Error("Connexion administrateur requise.");
 
-    const { data, error } = await db
-      .from("piegeage_parcels")
-      .insert(payload)
-      .select("id, exploitation, name, variety, area_ha, created_by, created_at")
-      .single();
-
+  if (navigator.onLine) {
+    const { data: saved, error } = await db.from(table).upsert(payload, { onConflict: "id" }).select().maybeSingle();
     if (!error) {
-      await removePendingParcel(parcel.id);
-      if (!parcels.some(item => item.id === data.id)) parcels.push(data);
-      synced += 1;
+      if (saved) applyLocal(table, { ...saved, _pending: false });
+      await idbDelete(OFFLINE_QUEUE_STORE, `${table}:${payload.id}`).catch(() => {});
+      await saveCache();
+      return saved || payload;
+    }
+    if (!isNetworkError(error)) {
+      if (!options.silent) throw error;
+      console.warn(error);
+      return payload;
+    }
+  }
+
+  await queueRecord(table, payload);
+  return payload;
+}
+
+async function syncQueue() {
+  if (syncInProgress || !navigator.onLine || !currentUser) return;
+  const queue = await pendingQueue();
+  if (!queue.length) { updateSyncStatus(); return; }
+
+  syncInProgress = true;
+  updateSyncStatus(`Synchronisation de ${queue.length} élément${queue.length > 1 ? "s" : ""}…`, "syncing");
+  const sorted = queue.slice().sort((a, b) => SYNC_PRIORITY.indexOf(a.table) - SYNC_PRIORITY.indexOf(b.table));
+  let done = 0;
+
+  for (const item of sorted) {
+    const { error } = await db.from(item.table).upsert(item.payload, { onConflict: "id" });
+    if (!error) {
+      await idbDelete(OFFLINE_QUEUE_STORE, item.key);
+      done++;
       continue;
     }
-
-    if (error.code === "23505") {
-      const { data: existing, error: lookupError } = await db
-        .from("piegeage_parcels")
-        .select("id, exploitation, name, variety, area_ha, created_by, created_at")
-        .eq("exploitation", parcel.exploitation)
-        .eq("name", parcel.name)
-        .maybeSingle();
-
-      if (!lookupError && existing) {
-        await remapPendingObservations(parcel.id, existing.id);
-        await removePendingParcel(parcel.id);
-        if (!parcels.some(item => item.id === existing.id)) parcels.push(existing);
-        synced += 1;
-        continue;
-      }
-    }
-
     if (isNetworkError(error)) break;
-
-    console.warn("Parcelle non synchronisée :", error);
+    console.warn("Synchronisation impossible", item.table, error);
   }
 
-  parcels.sort((a, b) =>
-    a.exploitation.localeCompare(b.exploitation, "fr") ||
-    a.name.localeCompare(b.name, "fr")
-  );
-
-  return synced;
+  syncInProgress = false;
+  if (done) {
+    updateSyncStatus(`${done} élément${done > 1 ? "s" : ""} synchronisé${done > 1 ? "s" : ""}`, "success");
+    await loadData(true);
+    setTimeout(() => updateSyncStatus(), 3500);
+  } else updateSyncStatus();
 }
 
-function displayObservations() {
-  const remoteIds = new Set(observations.map(record => record.id));
-
-  return [
-    ...observations,
-    ...pendingObservations.filter(record => !remoteIds.has(record.id))
-  ];
-}
-
-function isNetworkError(error) {
-  if (!navigator.onLine) return true;
-
-  const message = String(error?.message || error || "");
-  return /failed to fetch|network|load failed|fetch failed|networkerror/i.test(message);
-}
-
-function updateSyncStatus(message = null, mode = null) {
+async function updateSyncStatus(message = null, mode = null) {
   const box = $("syncStatus");
   if (!box) return;
-
   box.classList.remove("hidden", "offline", "syncing", "success");
 
   if (message) {
@@ -298,1306 +252,661 @@ function updateSyncStatus(message = null, mode = null) {
     return;
   }
 
-  const parcelCount = pendingParcels.length;
-  const observationCount = pendingObservations.length;
-  const total = parcelCount + observationCount;
-
-  const parts = [];
-  if (parcelCount) {
-    parts.push(`${parcelCount} parcelle${parcelCount > 1 ? "s" : ""}`);
-  }
-  if (observationCount) {
-    parts.push(`${observationCount} relevé${observationCount > 1 ? "s" : ""}`);
-  }
-
+  const queue = await pendingQueue();
   if (!navigator.onLine) {
-    box.textContent = total
-      ? `Hors connexion — ${parts.join(" · ")} en attente`
-      : "Hors connexion";
+    box.textContent = queue.length ? `Hors connexion — ${queue.length} élément${queue.length > 1 ? "s" : ""} en attente` : "Hors connexion";
     box.classList.add("offline");
-    return;
-  }
-
-  if (total) {
-    box.textContent = `${parts.join(" · ")} en attente de synchronisation`;
+  } else if (queue.length) {
+    box.textContent = `${queue.length} élément${queue.length > 1 ? "s" : ""} en attente de synchronisation`;
     box.classList.add("syncing");
-    return;
-  }
-
-  box.classList.add("hidden");
-}
-function showSyncSuccess(parcelCount, observationCount) {
-  const parts = [];
-
-  if (parcelCount) {
-    parts.push(`${parcelCount} parcelle${parcelCount > 1 ? "s" : ""}`);
-  }
-  if (observationCount) {
-    parts.push(`${observationCount} relevé${observationCount > 1 ? "s" : ""}`);
-  }
-
-  if (!parts.length) {
-    updateSyncStatus();
-    return;
-  }
-
-  updateSyncStatus(`${parts.join(" · ")} synchronisé${parcelCount + observationCount > 1 ? "s" : ""}`, "success");
-  window.setTimeout(() => updateSyncStatus(), 3500);
-}
-function createOfflineObservation({ parcelId, pest, date, captures }) {
-  const id = crypto.randomUUID();
-
-  return {
-    id,
-    parcel_id: parcelId,
-    pest,
-    observed_on: date,
-    captures,
-    created_by: currentUser.id,
-    created_at: new Date().toISOString(),
-    _pending: true
-  };
+  } else box.classList.add("hidden");
 }
 
-async function queueObservation(record) {
-  await idbPut(OFFLINE_STORE_PENDING, record);
-  pendingObservations.push(record);
-  pendingObservations.sort((a, b) =>
-    a.observed_on.localeCompare(b.observed_on) ||
-    a.created_at.localeCompare(b.created_at)
-  );
-  updateSyncStatus();
-}
-
-async function removePendingObservation(id) {
-  await idbDelete(OFFLINE_STORE_PENDING, id);
-  pendingObservations = pendingObservations.filter(record => record.id !== id);
-  updateSyncStatus();
-}
-
-async function syncPendingObservations() {
-  if (!navigator.onLine || !currentUser || !pendingObservations.length) return 0;
-
-  let synced = 0;
-  const queue = pendingObservations.slice();
-
-  for (const record of queue) {
-    if (record.created_by !== currentUser.id) continue;
-
-    const payload = {
-      id: record.id,
-      parcel_id: record.parcel_id,
-      pest: record.pest,
-      observed_on: record.observed_on,
-      captures: record.captures,
-      created_by: record.created_by
-    };
-
-    const { data, error } = await db
-      .from("piegeage_observations")
-      .insert(payload)
-      .select("id, parcel_id, pest, observed_on, captures, created_by, created_at")
-      .single();
-
-    if (!error || error.code === "23505") {
-      await removePendingObservation(record.id);
-
-      if (data && !observations.some(item => item.id === data.id)) {
-        observations.push(data);
-      }
-
-      synced += 1;
-      continue;
-    }
-
-    if (isNetworkError(error)) break;
-
-    console.warn("Relevé non synchronisé :", error);
-  }
-
-  observations.sort((a, b) =>
-    a.observed_on.localeCompare(b.observed_on) ||
-    a.created_at.localeCompare(b.created_at)
-  );
-
-  return synced;
-}
-
-async function syncPendingData() {
-  if (syncInProgress || !navigator.onLine || !currentUser) {
-    updateSyncStatus();
-    return;
-  }
-
-  if (!pendingParcels.length && !pendingObservations.length) {
-    updateSyncStatus();
-    return;
-  }
-
-  syncInProgress = true;
-
-  const parts = [];
-  if (pendingParcels.length) parts.push(`${pendingParcels.length} parcelle${pendingParcels.length > 1 ? "s" : ""}`);
-  if (pendingObservations.length) parts.push(`${pendingObservations.length} relevé${pendingObservations.length > 1 ? "s" : ""}`);
-
-  updateSyncStatus(`Synchronisation de ${parts.join(" · ")}…`, "syncing");
-
-  const syncedParcels = await syncPendingParcels();
-  const syncedObservations = await syncPendingObservations();
-
-  syncInProgress = false;
-
-  if (syncedParcels || syncedObservations) {
-    await saveCachedData();
-    populateYears();
-    populateFarms();
-    populateEntryFarms();
-    renderParcelList();
-    refresh();
-    showSyncSuccess(syncedParcels, syncedObservations);
-  } else {
-    updateSyncStatus();
-  }
-}
-
-function configReady() {
-  const c = window.SAM_CONFIG || {};
-  return Boolean(c.SUPABASE_URL && c.SUPABASE_ANON_KEY);
-}
-
+// -----------------------------------------------------------------------------
+// Supabase / authentification
+// -----------------------------------------------------------------------------
 async function init() {
   if (!configReady()) {
     setMessage($("globalMessage"), "Configuration Supabase absente dans config.js.", true);
     return;
   }
-
-  db = window.supabase.createClient(
-    window.SAM_CONFIG.SUPABASE_URL,
-    window.SAM_CONFIG.SUPABASE_ANON_KEY
-  );
-
+  db = window.supabase.createClient(window.SAM_CONFIG.SUPABASE_URL, window.SAM_CONFIG.SUPABASE_ANON_KEY);
   const { data: { session } } = await db.auth.getSession();
   currentUser = session?.user || null;
-  await loadPendingParcels();
-  await loadPendingObservations();
   renderAuth();
 
   db.auth.onAuthStateChange(async (_event, session) => {
     currentUser = session?.user || null;
-    await loadPendingParcels();
-    await loadPendingObservations();
     renderAuth();
-
-    if (currentUser && navigator.onLine) {
-      await syncPendingData();
-    }
+    await loadData();
+    if (currentUser) await syncQueue();
   });
 
   await loadData();
+  if (currentUser) await syncQueue();
 }
 
 function renderAuth() {
   const connected = Boolean(currentUser);
-
   $("loginForm").classList.toggle("hidden", connected);
   $("connectedBlock").classList.toggle("hidden", !connected);
-  $("editActions").hidden = !connected;
+  $("adminActions").classList.toggle("hidden", !connected);
   $("connectedEmail").textContent = currentUser?.email || "";
-
-  const actionHeader = $("historyActionHeader");
-  if (actionHeader) actionHeader.classList.toggle("hidden", !connected);
-
-  if (!connected) {
-    $("loginPassword").value = "";
-  }
-
-  renderHistory();
+  if (!connected) $("loginPassword").value = "";
 }
 
 async function login(event) {
-  if (event) event.preventDefault();
-
+  event.preventDefault();
+  setMessage($("loginMessage"));
   const email = $("loginEmail").value.trim();
   const password = $("loginPassword").value;
-  setMessage($("loginMessage"));
-
-  if (!email || !password) {
-    setMessage($("loginMessage"), "Renseignez l’adresse mail et le mot de passe.", true);
-    return;
-  }
-
-  const submitButton = $("loginForm").querySelector("button[type='submit']");
-  submitButton.disabled = true;
-
+  const button = $("loginForm").querySelector("button");
+  button.disabled = true;
   const { error } = await db.auth.signInWithPassword({ email, password });
-
-  submitButton.disabled = false;
-
-  if (error) {
-    setMessage(
-      $("loginMessage"),
-      "Connexion impossible. Vérifiez l’adresse mail et le mot de passe.",
-      true
-    );
-    return;
-  }
-
-  setMessage($("loginMessage"));
-  $("loginEmail").value = "";
-  $("loginPassword").value = "";
-  closeMobileAuthCard();
+  button.disabled = false;
+  if (error) return setMessage($("loginMessage"), "Connexion impossible. Vérifiez l’adresse mail et le mot de passe.", true);
+  $("loginEmail").value = ""; $("loginPassword").value = ""; closeMobileAuthCard();
 }
 
-async function logout() {
-  await db.auth.signOut();
-  closeMobileAuthCard();
+async function logout() { await db.auth.signOut(); closeMobileAuthCard(); }
+
+async function fetchTable(table) {
+  return await db.from(table).select("*");
 }
 
-async function loadData() {
-  setMessage($("globalMessage"), "Chargement…");
+async function loadData(silent = false) {
+  if (!db) return;
+  if (!silent) setMessage($("globalMessage"), "Chargement…");
 
-  const cached = await loadCachedData();
-
-  if (!navigator.onLine && cached) {
-    parcels = cached.parcels || [];
-    observations = cached.observations || [];
-    await loadPendingParcels();
-    await loadPendingObservations();
-
-    populateYears();
-    populateFarms();
-    populateEntryFarms();
-    refresh();
-    setMessage($("globalMessage"));
+  if (!navigator.onLine) {
+    const cached = await loadCache();
+    if (!cached) setMessage($("globalMessage"), "Aucune donnée locale disponible. Ouvre l’application une première fois avec Internet.", true);
+    else { setMessage($("globalMessage")); renderAll(); }
     updateSyncStatus();
     return;
   }
 
-  const [p, o] = await Promise.all([
-    db.from("piegeage_parcels")
-      .select("id, exploitation, name, variety, area_ha, created_by, created_at")
-      .order("exploitation")
-      .order("name"),
-    db.from("piegeage_observations")
-      .select("id, parcel_id, pest, observed_on, captures, created_by, created_at")
-      .order("observed_on")
-      .order("created_at")
-  ]);
+  const entries = Object.entries(TABLES);
+  const results = await Promise.all(entries.map(([, table]) => fetchTable(table)));
+  const firstError = results.find(r => r.error)?.error;
 
-  if (p.error || o.error) {
-    if (cached && (isNetworkError(p.error) || isNetworkError(o.error))) {
-      parcels = cached.parcels || [];
-      observations = cached.observations || [];
-      await loadPendingParcels();
-      await loadPendingObservations();
-
-      populateYears();
-      populateFarms();
-      populateEntryFarms();
-      refresh();
-      setMessage($("globalMessage"));
-      updateSyncStatus();
-      return;
+  if (firstError) {
+    const cached = await loadCache();
+    if (cached && isNetworkError(firstError)) {
+      setMessage($("globalMessage")); renderAll(); updateSyncStatus(); return;
     }
-
-    setMessage(
-      $("globalMessage"),
-      `Impossible de charger les données : ${p.error?.message || o.error?.message}`,
-      true
-    );
-    updateSyncStatus();
+    setMessage($("globalMessage"), `Chargement impossible : ${firstError.message}`, true);
     return;
   }
 
-  parcels = p.data || [];
-  observations = o.data || [];
-  await loadPendingParcels();
-  await loadPendingObservations();
-  await saveCachedData();
-
-  populateYears();
-  populateFarms();
-  populateEntryFarms();
-  refresh();
+  entries.forEach(([key], index) => { data[key] = results[index].data || []; });
+  await saveCache();
   setMessage($("globalMessage"));
+  renderAll();
   updateSyncStatus();
-
-  if (currentUser && (pendingParcels.length || pendingObservations.length)) {
-    await syncPendingData();
-  }
 }
 
-function populateYears(preferred = null) {
-  const select = $("yearSelect");
-  const current = String(new Date().getFullYear());
-  const previous = preferred || select.value;
-  const years = [...new Set([current, ...displayObservations().map(o => o.observed_on.slice(0, 4))])]
-    .sort((a, b) => b.localeCompare(a));
+// -----------------------------------------------------------------------------
+// Sélecteurs / relations
+// -----------------------------------------------------------------------------
+function activeRows(list) { return list.filter(row => !row.archived_at); }
+function campaignById(id) { return data.campaigns.find(row => row.id === id); }
+function parcelById(id) { return data.parcels.find(row => row.id === id); }
+function trapById(id) { return data.traps.find(row => row.id === id); }
+function speciesById(id) { return data.species.find(row => row.id === id); }
 
-  select.innerHTML = "";
-  years.forEach(y => select.add(new Option(y, y)));
-  select.value = years.includes(previous) ? previous : years[0];
+function activeCampaigns() {
+  return activeRows(data.campaigns).sort((a, b) => b.year - a.year || a.name.localeCompare(b.name, "fr"));
 }
 
-function populateFarms(preferred = null) {
-  const select = $("farmSelect");
-  const previous = preferred || select.value;
-  const farms = [...new Set(displayParcels().map(p => p.exploitation))].sort((a, b) => a.localeCompare(b, "fr"));
+function campaignSpecies(campaignId) {
+  const ids = data.campaignSpecies.filter(link => link.campaign_id === campaignId && link.active !== false).map(link => link.species_id);
+  return data.species.filter(s => ids.includes(s.id) && s.active !== false).sort((a, b) => a.scientific_name.localeCompare(b.scientific_name, "fr"));
+}
 
+function parcelsForCampaign(campaignId) {
+  const linked = new Set(data.campaignParcels.filter(link => link.campaign_id === campaignId).map(link => link.parcel_id));
+  activeRows(data.traps).filter(t => t.campaign_id === campaignId).forEach(t => linked.add(t.parcel_id));
+  return activeRows(data.parcels).filter(p => linked.has(p.id)).sort((a, b) => a.name.localeCompare(b.name, "fr"));
+}
+
+function trapsForCampaign(campaignId, parcelId = "all") {
+  return activeRows(data.traps)
+    .filter(t => t.campaign_id === campaignId && (parcelId === "all" || t.parcel_id === parcelId))
+    .sort((a, b) => a.code.localeCompare(b.code, "fr"));
+}
+
+function fillSelect(select, options, selected = null) {
+  if (!select) return;
   select.innerHTML = "";
-  if (!farms.length) {
-    select.add(new Option("Aucune exploitation", ""));
-    select.disabled = true;
-    populateParcelFilter();
-    return;
-  }
+  options.forEach(opt => select.add(new Option(opt.label, opt.value)));
+  if (selected != null && options.some(o => String(o.value) === String(selected))) select.value = selected;
+}
 
-  select.disabled = false;
-  farms.forEach(f => select.add(new Option(f, f)));
-  select.value = farms.includes(previous) ? previous : farms[0];
+function populateMainFilters() {
+  const campaignSelect = $("campaignFilter");
+  const previousCampaign = campaignSelect.value;
+  const campaigns = activeCampaigns();
+  fillSelect(campaignSelect, campaigns.length ? campaigns.map(c => ({ value: c.id, label: `${c.year} — ${c.name}` })) : [{ value: "", label: "Aucune campagne" }], previousCampaign);
+  if (!campaignSelect.value && campaigns[0]) campaignSelect.value = campaigns[0].id;
   populateParcelFilter();
 }
 
-function populateParcelFilter(preferred = null) {
-  const select = $("parcelSelect");
-  const farm = $("farmSelect").value;
-  const previous = preferred || select.value;
-  const list = displayParcels()
-    .filter(p => p.exploitation === farm)
-    .sort((a, b) => a.name.localeCompare(b.name, "fr"));
+function populateParcelFilter() {
+  const campaignId = $("campaignFilter").value;
+  const previous = $("parcelFilter").value;
+  const parcels = parcelsForCampaign(campaignId);
+  fillSelect($("parcelFilter"), [{ value: "all", label: "Toutes les parcelles" }, ...parcels.map(p => ({ value: p.id, label: `${p.name} — ${p.variety || ""}` }))], previous || "all");
+  populateTrapFilter();
+}
 
-  select.innerHTML = "";
-  if (!list.length) {
-    select.add(new Option("Aucune parcelle", ""));
-    select.disabled = true;
-    return;
+function populateTrapFilter() {
+  const campaignId = $("campaignFilter").value;
+  const parcelId = $("parcelFilter").value || "all";
+  const previous = $("trapFilter").value;
+  const traps = trapsForCampaign(campaignId, parcelId);
+  fillSelect($("trapFilter"), [{ value: "all", label: "Tous les pièges" }, ...traps.map(t => ({ value: t.id, label: `${t.code}${parcelById(t.parcel_id) ? ` — ${parcelById(t.parcel_id).name}` : ""}` }))], previous || "all");
+  populateSpeciesFilter();
+}
+
+function populateSpeciesFilter() {
+  const campaign = campaignById($("campaignFilter").value);
+  const previous = $("speciesFilter").value;
+  const opts = [{ value: "total", label: campaign?.protocol_type === "aphid" ? "Tous les pucerons (total capturé)" : "Total des captures" }];
+  if (campaign?.protocol_type === "aphid") {
+    campaignSpecies(campaign.id).forEach(s => opts.push({ value: s.id, label: s.scientific_name }));
   }
-
-  select.disabled = false;
-  select.add(new Option("Toutes les parcelles", "all"));
-  list.forEach(p => select.add(new Option(p.name, p.id)));
-  select.value = previous === "all" || list.some(p => p.id === previous) ? previous : "all";
+  fillSelect($("speciesFilter"), opts, previous || "total");
+  const detailsEnabled = campaign?.protocol_type === "aphid" && $("speciesFilter").value !== "total";
+  $("sexFilter").disabled = !detailsEnabled;
+  if (!detailsEnabled) $("sexFilter").value = "all";
+  renderDashboard();
 }
 
-function populateEntryFarms(preferredFarm = null, preferredParcel = null) {
-  const select = $("entryFarm");
-  const farms = [...new Set(displayParcels().map(p => p.exploitation))].sort((a, b) => a.localeCompare(b, "fr"));
-  const previous = preferredFarm || select.value;
-
-  select.innerHTML = "";
-  if (!farms.length) {
-    select.add(new Option("Aucune exploitation", ""));
-    select.disabled = true;
-    populateEntryParcels();
-    return;
-  }
-
-  select.disabled = false;
-  farms.forEach(f => select.add(new Option(f, f)));
-  select.value = farms.includes(previous) ? previous : farms[0];
-  populateEntryParcels(preferredParcel);
+function populateAdminSelects() {
+  const campaigns = activeCampaigns();
+  const campaignOpts = campaigns.map(c => ({ value: c.id, label: `${c.year} — ${c.name}` }));
+  ["trapCampaign", "observationCampaign", "interventionCampaign"].forEach(id => fillSelect($(id), campaignOpts, $(id)?.value || $("campaignFilter").value));
+  populateTrapParcelSelect();
+  populateObservationParcelSelect();
+  populateEventTrapSelect();
 }
 
-function populateEntryParcels(preferred = null) {
-  const select = $("entryParcel");
-  const farm = $("entryFarm").value;
-  const list = displayParcels()
-    .filter(p => p.exploitation === farm)
-    .sort((a, b) => a.name.localeCompare(b.name, "fr"));
-
-  select.innerHTML = "";
-  if (!list.length) {
-    select.add(new Option("Aucune parcelle", ""));
-    select.disabled = true;
-    return;
-  }
-
-  select.disabled = false;
-  list.forEach(p => select.add(new Option(p.name, p.id)));
-  if (preferred && list.some(p => p.id === preferred)) select.value = preferred;
+function populateTrapParcelSelect() {
+  const campaignId = $("trapCampaign")?.value;
+  const allParcels = activeRows(data.parcels).sort((a, b) => a.exploitation.localeCompare(b.exploitation, "fr") || a.name.localeCompare(b.name, "fr"));
+  fillSelect($("trapParcel"), allParcels.map(p => ({ value: p.id, label: `${p.exploitation} — ${p.name} — ${p.variety || ""}` })), $("trapParcel")?.value);
 }
 
-function activeParcels() {
-  const farm = $("farmSelect").value;
-  const parcelValue = $("parcelSelect").value;
-  const farmParcels = displayParcels().filter(p => p.exploitation === farm);
-  return parcelValue === "all"
-    ? farmParcels
-    : farmParcels.filter(p => p.id === parcelValue);
+function populateObservationParcelSelect(preferredParcel = null, preferredTrap = null) {
+  const campaignId = $("observationCampaign")?.value;
+  const parcels = parcelsForCampaign(campaignId);
+  fillSelect($("observationParcel"), parcels.map(p => ({ value: p.id, label: `${p.name} — ${p.variety || ""}` })), preferredParcel || $("observationParcel")?.value);
+  populateObservationTrapSelect(preferredTrap);
+  renderObservationSpeciesRows();
 }
 
-function activeObservations() {
-  const ids = new Set(activeParcels().map(p => p.id));
-  const pest = $("pestSelect").value;
-  const year = $("yearSelect").value;
-
-  return displayObservations()
-    .filter(o =>
-      ids.has(o.parcel_id) &&
-      (pest === "all" || o.pest === pest) &&
-      o.observed_on.startsWith(year)
-    )
-    .sort((a, b) => a.observed_on.localeCompare(b.observed_on) || a.created_at.localeCompare(b.created_at));
+function populateObservationTrapSelect(preferred = null) {
+  const campaignId = $("observationCampaign")?.value;
+  const parcelId = $("observationParcel")?.value;
+  const traps = trapsForCampaign(campaignId, parcelId);
+  fillSelect($("observationTrap"), traps.map(t => ({ value: t.id, label: t.code })), preferred || $("observationTrap")?.value);
 }
 
-function aggregateParcelRecords(records, mode) {
-  const byDate = new Map();
-  records.forEach(r => {
-    if (!byDate.has(r.observed_on)) byDate.set(r.observed_on, []);
-    byDate.get(r.observed_on).push(Number(r.captures));
+function populateEventTrapSelect() {
+  const campaignId = $("campaignFilter").value;
+  const traps = trapsForCampaign(campaignId);
+  fillSelect($("eventTrap"), traps.map(t => ({ value: t.id, label: `${parcelById(t.parcel_id)?.name || ""} — ${t.code}` })), $("eventTrap")?.value);
+}
+
+function renderAll() {
+  populateMainFilters();
+  populateAdminSelects();
+  renderManagementLists();
+  renderDashboard();
+}
+
+// -----------------------------------------------------------------------------
+// Analyses
+// -----------------------------------------------------------------------------
+function selectedObservations() {
+  const campaignId = $("campaignFilter").value;
+  const parcelId = $("parcelFilter").value || "all";
+  const trapId = $("trapFilter").value || "all";
+  return activeRows(data.observations).filter(obs => {
+    if (obs.campaign_id !== campaignId) return false;
+    const trap = trapById(obs.trap_id);
+    if (!trap || trap.archived_at) return false;
+    if (parcelId !== "all" && trap.parcel_id !== parcelId) return false;
+    if (trapId !== "all" && obs.trap_id !== trapId) return false;
+    return true;
+  }).sort((a, b) => a.observed_on.localeCompare(b.observed_on));
+}
+
+function detailsForObservation(obsId) { return data.details.filter(d => d.observation_id === obsId); }
+
+function identifiedTotal(obsId) {
+  return detailsForObservation(obsId).reduce((sum, d) => sum + Number(d.males || 0) + Number(d.females || 0) + Number(d.undetermined || 0), 0);
+}
+
+function observationValue(obs) {
+  const speciesId = $("speciesFilter").value;
+  const sex = $("sexFilter").value;
+  if (speciesId === "total") return Number(obs.total_captured || 0);
+  const detail = data.details.find(d => d.observation_id === obs.id && d.species_id === speciesId);
+  if (!detail) return 0;
+  if (sex === "male") return Number(detail.males || 0);
+  if (sex === "female") return Number(detail.females || 0);
+  if (sex === "undetermined") return Number(detail.undetermined || 0);
+  return Number(detail.males || 0) + Number(detail.females || 0) + Number(detail.undetermined || 0);
+}
+
+function daysBetween(a, b) {
+  const ms = new Date(`${b}T12:00:00`) - new Date(`${a}T12:00:00`);
+  return Math.max(1, Math.round(ms / 86400000));
+}
+
+function observationValueWithUnit(obs, allTrapObs) {
+  const value = observationValue(obs);
+  if ($("unitFilter").value !== "per_day") return value;
+  const index = allTrapObs.findIndex(o => o.id === obs.id);
+  const trap = trapById(obs.trap_id);
+  const previousObservationDate = index > 0 ? allTrapObs[index - 1].observed_on : null;
+  const resetEvents = activeRows(data.trapEvents)
+    .filter(e => e.trap_id === obs.trap_id && ["installation", "replacement"].includes(e.event_type) && e.event_date <= obs.observed_on)
+    .sort((a, b) => b.event_date.localeCompare(a.event_date));
+  const resetDate = resetEvents[0]?.event_date || trap?.installed_on || null;
+  let previousDate = previousObservationDate || resetDate;
+  if (resetDate && previousObservationDate && resetDate > previousObservationDate) previousDate = resetDate;
+  if (!previousDate) return null;
+  return value / daysBetween(previousDate, obs.observed_on);
+}
+
+function campaignAnchor(campaign, observations) {
+  if (campaign?.start_date) return campaign.start_date;
+  const dates = observations.map(o => o.observed_on).sort();
+  return dates[0] || todayISO();
+}
+
+function bucketStart(date, anchor) {
+  const d = new Date(`${date}T12:00:00`);
+  const a = new Date(`${anchor}T12:00:00`);
+  const diff = Math.floor((d - a) / 86400000);
+  const offset = Math.floor(Math.max(0, diff) / 7) * 7;
+  const out = new Date(a); out.setDate(out.getDate() + offset);
+  return out.toISOString().slice(0, 10);
+}
+
+function seriesData() {
+  const observations = selectedObservations();
+  const campaign = campaignById($("campaignFilter").value);
+  const processing = $("processingFilter").value;
+  const unit = $("unitFilter").value;
+  const anchor = campaignAnchor(campaign, observations);
+  const trapIds = [...new Set(observations.map(o => o.trap_id))];
+  const series = [];
+
+  trapIds.forEach(trapId => {
+    const trap = trapById(trapId);
+    const parcel = parcelById(trap?.parcel_id);
+    const trapObs = observations.filter(o => o.trap_id === trapId).sort((a, b) => a.observed_on.localeCompare(b.observed_on));
+    let points = [];
+
+    if (processing === "observed") {
+      points = trapObs.map(obs => ({ date: obs.observed_on, value: observationValueWithUnit(obs, trapObs) }));
+    } else {
+      const groups = new Map();
+      trapObs.forEach(obs => {
+        const week = bucketStart(obs.observed_on, anchor);
+        if (!groups.has(week)) groups.set(week, []);
+        const v = observationValueWithUnit(obs, trapObs);
+        if (v != null) groups.get(week).push(v);
+      });
+      const weeks = [...groups.keys()].sort();
+      const weekly = weeks.map(week => {
+        const values = groups.get(week);
+        const value = unit === "per_day" ? values.reduce((a,b)=>a+b,0) / Math.max(1, values.length) : values.reduce((a,b)=>a+b,0);
+        return { date: week, value };
+      });
+      if (processing === "weekly") points = weekly;
+      else points = weekly.map((point, index) => ({ date: point.date, value: index === 0 ? point.value : (point.value + weekly[index - 1].value) / 2 }));
+    }
+
+    series.push({ trap, parcel, label: `${parcel?.name || "Parcelle"} — ${trap?.code || "Piège"}`, points });
   });
 
-  return [...byDate.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([date, values]) => ({
-      date,
-      value: mode === "average"
-        ? values.reduce((s, v) => s + v, 0) / values.length
-        : values.reduce((s, v) => s + v, 0)
-    }));
+  return { campaign, observations, series, anchor };
 }
 
-function buildParcelSeries() {
-  const mode = $("calculationSelect").value;
-  const pest = $("pestSelect").value;
-  const year = $("yearSelect").value;
-  const parcelsToShow = activeParcels();
+function eventDateForProcessing(date, anchor) {
+  return $("processingFilter").value === "observed" ? date : bucketStart(date, anchor);
+}
 
-  if (pest === "all") {
-    return parcelsToShow.flatMap(parcel =>
-      Object.keys(PESTS).map(pestKey => {
-        const records = displayObservations().filter(
-          o =>
-            o.parcel_id === parcel.id &&
-            o.pest === pestKey &&
-            o.observed_on.startsWith(year)
-        );
-
-        return {
-          parcel,
-          pest: pestKey,
-          label: `${parcel.name} — ${PESTS[pestKey]}`,
-          points: aggregateParcelRecords(records, mode)
-        };
-      })
-    ).filter(series => series.points.length);
+const eventLinePlugin = {
+  id: "samEvents",
+  afterDatasetsDraw(chartInstance, _args, pluginOptions) {
+    const events = pluginOptions?.events || [];
+    const x = chartInstance.scales.x;
+    const y = chartInstance.scales.y;
+    if (!x || !y) return;
+    const ctx = chartInstance.ctx;
+    events.forEach(event => {
+      const index = chartInstance.data.labels.indexOf(event.date);
+      if (index < 0) return;
+      const px = x.getPixelForValue(index);
+      ctx.save();
+      ctx.strokeStyle = "rgba(140,90,17,.75)";
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([5,4]);
+      ctx.beginPath(); ctx.moveTo(px, y.top); ctx.lineTo(px, y.bottom); ctx.stroke();
+      ctx.restore();
+    });
   }
+};
+Chart.register(eventLinePlugin);
 
-  return parcelsToShow.map(parcel => {
-    const records = displayObservations().filter(
-      o => o.parcel_id === parcel.id && o.pest === pest && o.observed_on.startsWith(year)
-    );
-
-    return {
-      parcel,
-      pest,
-      label: parcel.name,
-      points: aggregateParcelRecords(records, mode)
-    };
-  }).filter(series => series.points.length);
-}
-
-function cumulativePoints(points) {
-  let total = 0;
-  return points.map(p => ({ date: p.date, value: (total += p.value) }));
-}
-
-function metricSeries() {
-  const mode = $("calculationSelect").value;
-  const records = activeObservations();
-  const grouped = new Map();
-
-  records.forEach(r => {
-    if (!grouped.has(r.observed_on)) grouped.set(r.observed_on, []);
-    grouped.get(r.observed_on).push(Number(r.captures));
-  });
-
-  return [...grouped.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([date, values]) => ({
-      date,
-      value: mode === "average"
-        ? values.reduce((s, v) => s + v, 0) / values.length
-        : values.reduce((s, v) => s + v, 0)
-    }));
-}
-
-function trend(values) {
-  if (values.length < 2) return "À compléter";
-  const last = values.at(-1);
-  const base = values.length >= 3 ? (values.at(-2) + values.at(-3)) / 2 : values.at(-2);
-  if (Math.abs(last - base) < 0.5) return "Stable";
-  return last > base ? "En augmentation" : "En diminution";
-}
-
-function refresh() {
+function renderDashboard() {
+  if (!$("campaignFilter")) return;
   renderMetrics();
   renderChart();
   renderHistory();
 }
 
 function renderMetrics() {
-  const records = activeObservations();
-  const series = metricSeries();
-  const values = series.map(x => x.value);
-  const last = series.at(-1);
-
-  $("lastValue").textContent = last ? `${formatNumber(last.value)} captures` : "—";
-  $("lastDate").textContent = last ? `Relevé du ${formatDate(last.date)}` : "Aucune donnée";
-  $("trendValue").textContent = trend(values);
-  $("seasonTotal").textContent = values.length ? formatNumber(values.reduce((s, v) => s + v, 0)) : "—";
-  $("seasonUnit").textContent = $("calculationSelect").value === "average"
-    ? "somme des moyennes par date"
-    : "captures cumulées";
-  $("recordCount").textContent = String(records.length);
-
-  const latestCreated = records.slice().sort((a, b) => a.created_at.localeCompare(b.created_at)).at(-1);
-  $("lastUpdate").textContent = latestCreated ? `Dernière saisie : ${formatDateTime(latestCreated.created_at)}` : "Aucune mise à jour";
+  const observations = selectedObservations();
+  if (!observations.length) {
+    $("lastValue").textContent = "—"; $("lastDate").textContent = "Aucune donnée";
+    $("seasonTotal").textContent = "—"; $("identificationValue").textContent = "—"; $("identificationText").textContent = "—";
+    $("recordCount").textContent = "0"; $("recordPeriod").textContent = "—"; return;
+  }
+  const last = observations[observations.length - 1];
+  const values = observations.map(o => observationValue(o));
+  $("lastValue").textContent = fmtNumber(observationValue(last), 1);
+  $("lastDate").textContent = fmtDate(last.observed_on);
+  $("seasonTotal").textContent = fmtNumber(values.reduce((a,b)=>a+b,0), 1);
+  $("seasonUnit").textContent = $("unitFilter").value === "per_day" ? "valeur brute cumulée — voir courbe/jour" : "captures";
+  const totalCaptured = observations.reduce((sum, o) => sum + Number(o.total_captured || 0), 0);
+  const identified = observations.reduce((sum, o) => sum + identifiedTotal(o.id), 0);
+  const pct = totalCaptured ? Math.round(100 * identified / totalCaptured) : 0;
+  $("identificationValue").textContent = campaignById($("campaignFilter").value)?.protocol_type === "aphid" ? `${pct} %` : "—";
+  $("identificationText").textContent = campaignById($("campaignFilter").value)?.protocol_type === "aphid" ? `${identified} identifiés / ${totalCaptured}` : "Protocole simple";
+  $("recordCount").textContent = observations.length;
+  $("recordPeriod").textContent = `${fmtDate(observations[0].observed_on)} → ${fmtDate(last.observed_on)}`;
 }
 
 function renderChart() {
-  if (chart) {
-    chart.destroy();
-    chart = null;
-  }
+  const { campaign, series, anchor } = seriesData();
+  const speciesId = $("speciesFilter").value;
+  const speciesLabel = speciesId === "total" ? (campaign?.protocol_type === "aphid" ? "Tous les pucerons" : "Captures") : (speciesById(speciesId)?.scientific_name || "Espèce");
+  const unitLabel = $("unitFilter").value === "per_day" ? "captures / jour" : "captures";
+  const processLabel = { observed: "valeurs observées", weekly: "total hebdomadaire", smoothed: "lissage Bertrand (moyenne semaine courante + précédente)" }[$("processingFilter").value];
+  $("chartTitle").textContent = `${speciesLabel} — ${unitLabel} — ${processLabel}`;
+  $("campaignSummary").textContent = campaign ? `${campaign.pest_label} · ${campaign.year} · protocole ${campaign.protocol_type === "aphid" ? "pucerons détaillé" : "simple"}` : "";
 
-  const canvas = $("trapChart");
-  const empty = $("chartEmpty");
-  const series = buildParcelSeries();
-  const display = $("displaySelect").value;
+  const labelsSet = new Set();
+  series.forEach(s => s.points.forEach(p => labelsSet.add(p.date)));
 
-  if (!series.length) {
-    canvas.style.display = "none";
-    empty.style.display = "grid";
-    empty.textContent = "Aucune donnée pour cette sélection.";
-    $("chartTitle").textContent = "Captures par relevé";
-    return;
-  }
+  const selectedParcelId = $("parcelFilter").value || "all";
+  const interventions = activeRows(data.interventions).filter(i => {
+    if (i.campaign_id !== campaign?.id) return false;
+    if (selectedParcelId === "all") return true;
+    const links = data.interventionParcels.filter(l => l.intervention_id === i.id);
+    return !links.length || links.some(l => l.parcel_id === selectedParcelId);
+  });
+  const relevantTrapIds = new Set(series.map(s => s.trap.id));
+  const trapEvents = activeRows(data.trapEvents).filter(e => relevantTrapIds.has(e.trap_id));
+  const events = [
+    ...interventions.map(i => ({ date: eventDateForProcessing(i.intervention_date, anchor), label: `${i.intervention_type}${i.product ? ` — ${i.product}` : ""}` })),
+    ...trapEvents.map(e => ({ date: eventDateForProcessing(e.event_date, anchor), label: `${e.event_type} — ${e.label || trapById(e.trap_id)?.code || "piège"}` }))
+  ];
+  events.forEach(e => labelsSet.add(e.date));
+  const labels = [...labelsSet].sort();
 
-  canvas.style.display = "block";
-  empty.style.display = "none";
+  const datasets = series.map((s, index) => ({
+    label: s.label,
+    data: labels.map(date => s.points.find(p => p.date === date)?.value ?? null),
+    borderWidth: 2,
+    pointRadius: 3,
+    tension: .2,
+    spanGaps: true
+  }));
 
-  const allDates = [...new Set(
-    series.flatMap(s => (display === "cumulative" ? cumulativePoints(s.points) : s.points).map(p => p.date))
-  )].sort();
-
-  const datasets = series.map((s, index) => {
-    const points = display === "cumulative" ? cumulativePoints(s.points) : s.points;
-    const map = new Map(points.map(p => [p.date, p.value]));
-    return {
-      label: s.label || s.parcel.name,
-      data: allDates.map(date => map.has(date) ? map.get(date) : null),
-      borderColor: COLORS[index % COLORS.length],
-      backgroundColor: COLORS[index % COLORS.length],
-      tension: 0.22,
-      pointRadius: 4,
-      pointHoverRadius: 6,
-      borderWidth: 2.4,
-      spanGaps: true
-    };
+  $("chartEmpty").classList.toggle("hidden", Boolean(datasets.length));
+  if (chart) chart.destroy();
+  chart = new Chart($("trapChart"), {
+    type: "line",
+    data: { labels: labels.map(fmtDate), datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false, interaction: { mode: "nearest", intersect: false },
+      plugins: { legend: { position: "bottom" }, samEvents: { events: events.map(e => ({ ...e, date: fmtDate(e.date) })) } },
+      scales: { y: { beginAtZero: true, title: { display: true, text: unitLabel } }, x: { ticks: { maxRotation: 45, minRotation: 0 } } }
+    }
   });
 
-  const selectedPest = $("pestSelect").value;
-  const pestLabel = selectedPest === "all" ? "Tous les ravageurs" : PESTS[selectedPest];
-
-  $("chartTitle").textContent = display === "cumulative"
-    ? `Cumul saisonnier — ${pestLabel}`
-    : `Dynamique des captures — ${pestLabel}`;
-
-  chart = new Chart(canvas, {
-    type: "line",
-    data: {
-      labels: allDates.map(formatDate),
-      datasets
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      interaction: { mode: "nearest", intersect: false },
-      plugins: {
-        legend: {
-          display: datasets.length > 1,
-          position: "bottom",
-          labels: { usePointStyle: true, boxWidth: 8, padding: 17 }
-        }
-      },
-      scales: {
-        x: { grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 12 } },
-        y: {
-          beginAtZero: true,
-          title: {
-            display: true,
-            text: display === "cumulative"
-              ? "Cumul des captures"
-              : ($("calculationSelect").value === "average" ? "Moyenne des captures" : "Total des captures")
-          },
-          grid: { color: "rgba(102,113,123,.13)" }
-        }
-      }
+  const legend = $("eventLegend"); legend.innerHTML = "";
+  const allEvents = [...interventions.map(i => ({ type: "Intervention", date: i.intervention_date, label: `${i.intervention_type}${i.product ? ` — ${i.product}` : ""}`, record: i, table: TABLES.interventions })), ...trapEvents.map(e => ({ type: "Piège", date: e.event_date, label: e.label || e.event_type, record: e, table: TABLES.trapEvents }))].sort((a,b)=>a.date.localeCompare(b.date));
+  allEvents.forEach(event => {
+    const chip = document.createElement("span"); chip.className = "event-chip"; chip.textContent = `${fmtDate(event.date)} · ${event.type} : ${event.label}`;
+    if (currentUser) {
+      const btn = document.createElement("button"); btn.type = "button"; btn.className = "event-archive-button"; btn.textContent = " ×"; btn.title = "Archiver";
+      btn.style.cssText = "border:0;background:transparent;color:inherit;font-weight:900;padding:0 0 0 4px";
+      btn.addEventListener("click", async () => { if (confirm("Archiver cet événement ?")) { await archiveRecord(event.table, event.record, true); renderAll(); } });
+      chip.appendChild(btn);
     }
+    legend.appendChild(chip);
   });
 }
 
 function renderHistory() {
-  const tbody = $("historyBody");
-  if (!tbody) return;
+  const container = $("historyList"); container.innerHTML = "";
+  const observations = selectedObservations().slice().sort((a,b)=>b.observed_on.localeCompare(a.observed_on) || String(b.created_at).localeCompare(String(a.created_at)));
+  if (!observations.length) { container.innerHTML = '<div class="history-empty">Aucun relevé pour cette sélection.</div>'; return; }
 
-  tbody.innerHTML = "";
-  const records = activeObservations().slice().sort(
-    (a, b) => b.observed_on.localeCompare(a.observed_on) || b.created_at.localeCompare(a.created_at)
-  );
-
-  const connected = Boolean(currentUser);
-  const actionHeader = $("historyActionHeader");
-  if (actionHeader) actionHeader.classList.toggle("hidden", !connected);
-
-  if (!records.length) {
-    const row = document.createElement("tr");
-    row.className = "empty-row";
-    row.innerHTML = `<td colspan="${connected ? 6 : 5}">Aucun relevé enregistré pour cette sélection.</td>`;
-    tbody.appendChild(row);
-    return;
-  }
-
-  const parcelMap = new Map(displayParcels().map(p => [p.id, p.name]));
-
-  records.forEach(record => {
-    const row = document.createElement("tr");
-    if (record._pending) row.classList.add("pending-row");
-
-    const values = [
-      ["Date", formatDate(record.observed_on)],
-      ["Parcelle", parcelMap.get(record.parcel_id) || "—"],
-      ["Ravageur", PESTS[record.pest] || record.pest],
-      ["Captures", formatNumber(record.captures, 0)],
-      ["Enregistré", record._pending ? "En attente de synchronisation" : formatDateTime(record.created_at)]
-    ];
-
-    values.forEach(([label, text], index) => {
-      const td = document.createElement("td");
-      td.textContent = text;
-      td.dataset.label = label;
-      if (index === 3) td.style.fontWeight = "800";
-      row.appendChild(td);
-    });
-
-    if (connected) {
-      const actionCell = document.createElement("td");
-      actionCell.dataset.label = "Action";
-      actionCell.className = "history-action-cell";
-
-      const deleteButton = document.createElement("button");
-      deleteButton.type = "button";
-      deleteButton.className = "delete-row-button";
-      deleteButton.textContent = "Supprimer";
-      deleteButton.addEventListener("click", () => deleteObservation(record));
-
-      actionCell.appendChild(deleteButton);
-      row.appendChild(actionCell);
+  observations.forEach(obs => {
+    const trap = trapById(obs.trap_id); const parcel = parcelById(trap?.parcel_id); const details = detailsForObservation(obs.id);
+    const identified = identifiedTotal(obs.id); const remaining = Math.max(0, Number(obs.total_captured || 0) - identified);
+    const card = document.createElement("article"); card.className = `history-card${obs._pending ? " pending" : ""}`;
+    const main = document.createElement("div"); main.className = "history-main";
+    main.innerHTML = `<strong>${fmtDate(obs.observed_on)} — ${parcel?.name || "—"} — ${trap?.code || "—"}</strong><div class="history-meta"><b>${obs.total_captured}</b> capturé${obs.total_captured > 1 ? "s" : ""}${campaignById(obs.campaign_id)?.protocol_type === "aphid" ? ` · ${identified} identifié${identified > 1 ? "s" : ""} · ${remaining} restant${remaining > 1 ? "s" : ""}` : ""}${obs.comment ? ` · ${escapeHtml(obs.comment)}` : ""}</div>`;
+    if (details.length) {
+      const detailWrap = document.createElement("div"); detailWrap.className = "history-details";
+      details.filter(d => Number(d.males||0)+Number(d.females||0)+Number(d.undetermined||0)>0).forEach(d => {
+        const s = speciesById(d.species_id); const pill = document.createElement("span"); pill.className = "detail-pill";
+        pill.textContent = `${s?.scientific_name || "Espèce"} : ${Number(d.males||0)+Number(d.females||0)+Number(d.undetermined||0)} (${d.males||0} M / ${d.females||0} F / ${d.undetermined||0} I)`;
+        detailWrap.appendChild(pill);
+      });
+      main.appendChild(detailWrap);
     }
-
-    tbody.appendChild(row);
+    card.appendChild(main);
+    if (currentUser) {
+      const actions = document.createElement("div"); actions.className = "history-actions";
+      const edit = button("Modifier", "small-button", () => openObservationDialog(obs));
+      const archive = button("Archiver", "small-button danger", async () => { if (confirm("Archiver ce relevé ?")) { await archiveRecord(TABLES.observations, obs, true); renderAll(); } });
+      actions.append(edit, archive); card.appendChild(actions);
+    }
+    container.appendChild(card);
   });
 }
 
-async function deleteObservation(record) {
-  if (!currentUser) return;
-
-  const confirmed = window.confirm(
-    record._pending
-      ? "Supprimer ce relevé en attente de synchronisation ?"
-      : "Supprimer définitivement ce relevé ?"
-  );
-
-  if (!confirmed) return;
-
-  if (record._pending) {
-    await removePendingObservation(record.id);
-    refresh();
-    setMessage($("globalMessage"), "Relevé supprimé.");
-    return;
-  }
-
-  const { error } = await db
-    .from("piegeage_observations")
-    .delete()
-    .eq("id", record.id);
-
-  if (error) {
-    setMessage(
-      $("globalMessage"),
-      `Suppression impossible : ${error.message}`,
-      true
-    );
-    return;
-  }
-
-  observations = observations.filter(item => item.id !== record.id);
-  await saveCachedData();
-  refresh();
-  setMessage($("globalMessage"), "Relevé supprimé.");
-
-  window.setTimeout(() => {
-    if ($("globalMessage").textContent === "Relevé supprimé.") {
-      setMessage($("globalMessage"));
-    }
-  }, 3000);
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>'"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]));
 }
 
-async function createParcel(event) {
-  event.preventDefault();
-  if (!currentUser) return;
+function button(text, className, handler) {
+  const b = document.createElement("button"); b.type = "button"; b.className = className; b.textContent = text; b.addEventListener("click", handler); return b;
+}
 
-  setMessage($("parcelMessage"));
+// -----------------------------------------------------------------------------
+// Gestion / archivage
+// -----------------------------------------------------------------------------
+async function archiveRecord(table, record, archived) {
+  const payload = { ...record, archived_at: archived ? new Date().toISOString() : null, updated_at: new Date().toISOString() };
+  delete payload._pending;
+  await writeRecord(table, payload);
+}
 
-  const exploitation = $("parcelFarm").value.trim();
-  const name = $("parcelName").value.trim();
-  const variety = $("parcelVariety").value.trim();
-  const area = Number($("parcelArea").value);
+function renderManagementLists() {
+  renderCampaignList(); renderParcelList(); renderTrapList(); renderSpeciesList();
+}
 
-  if (!exploitation || !name || !variety || !Number.isFinite(area) || area < 0) {
-    setMessage($("parcelMessage"), "Renseignez tous les champs.", true);
-    return;
-  }
-
-  const duplicate = displayParcels().some(parcel =>
-    parcel.exploitation.trim().toLowerCase() === exploitation.toLowerCase() &&
-    parcel.name.trim().toLowerCase() === name.toLowerCase()
-  );
-
-  if (duplicate) {
-    setMessage($("parcelMessage"), "Cette parcelle existe déjà pour cette exploitation.", true);
-    return;
-  }
-
-  const localParcel = createOfflineParcel({
-    exploitation,
-    name,
-    variety,
-    area
+function renderCampaignList() {
+  const box = $("campaignManageList"); if (!box) return; box.innerHTML = "";
+  data.campaigns.slice().sort((a,b)=>b.year-a.year || a.name.localeCompare(b.name,"fr")).forEach(c => {
+    const item = managementItem(`${c.year} — ${c.name}`, `${c.pest_label} · ${c.protocol_type === "aphid" ? "protocole pucerons" : "protocole simple"}`, c.archived_at);
+    item.actions.append(button("Modifier", "small-button", () => openCampaignDialog(c)), button(c.archived_at ? "Restaurer" : "Archiver", `small-button ${c.archived_at ? "restore" : "danger"}`, async()=>{await archiveRecord(TABLES.campaigns,c,!c.archived_at);renderAll();}));
+    box.appendChild(item.root);
   });
-
-  let savedOnline = false;
-  let savedParcel = localParcel;
-
-  if (navigator.onLine) {
-    const { data, error } = await db
-      .from("piegeage_parcels")
-      .insert({
-        id: localParcel.id,
-        exploitation: localParcel.exploitation,
-        name: localParcel.name,
-        variety: localParcel.variety,
-        area_ha: localParcel.area_ha,
-        created_by: localParcel.created_by
-      })
-      .select("id, exploitation, name, variety, area_ha, created_by, created_at")
-      .single();
-
-    if (!error) {
-      parcels.push(data);
-      savedOnline = true;
-      savedParcel = data;
-      await saveCachedData();
-    } else if (!isNetworkError(error)) {
-      setMessage(
-        $("parcelMessage"),
-        error.code === "23505"
-          ? "Cette parcelle existe déjà pour cette exploitation."
-          : `Création impossible : ${error.message}`,
-        true
-      );
-      return;
-    }
-  }
-
-  if (!savedOnline) {
-    await queueParcel(localParcel);
-  }
-
-  $("parcelForm").reset();
-
-  populateFarms(savedParcel.exploitation);
-  populateEntryFarms(savedParcel.exploitation, savedParcel.id);
-  $("parcelSelect").value = savedParcel.id;
-  renderParcelList();
-  refresh();
-
-  setMessage(
-    $("parcelMessage"),
-    savedOnline
-      ? "Parcelle créée."
-      : "Parcelle créée hors connexion. Elle sera synchronisée automatiquement."
-  );
-
-  updateSyncStatus();
 }
-
-async function createObservation(event) {
-  event.preventDefault();
-  if (!currentUser) return;
-
-  setMessage($("observationMessage"));
-
-  const parcelId = $("entryParcel").value;
-  const pest = $("entryPest").value;
-  const date = $("observationDate").value;
-  const captures = Number($("observationCount").value);
-
-  if (!parcelId || !pest || !date || !Number.isInteger(captures) || captures < 0) {
-    setMessage($("observationMessage"), "Renseignez tous les champs correctement.", true);
-    return;
-  }
-
-  const localRecord = createOfflineObservation({
-    parcelId,
-    pest,
-    date,
-    captures
-  });
-
-  let savedOnline = false;
-
-  if (navigator.onLine) {
-    const { data, error } = await db
-      .from("piegeage_observations")
-      .insert({
-        id: localRecord.id,
-        parcel_id: localRecord.parcel_id,
-        pest: localRecord.pest,
-        observed_on: localRecord.observed_on,
-        captures: localRecord.captures,
-        created_by: localRecord.created_by
-      })
-      .select("id, parcel_id, pest, observed_on, captures, created_by, created_at")
-      .single();
-
-    if (!error) {
-      observations.push(data);
-      observations.sort((a, b) =>
-        a.observed_on.localeCompare(b.observed_on) ||
-        a.created_at.localeCompare(b.created_at)
-      );
-      savedOnline = true;
-      await saveCachedData();
-    } else if (!isNetworkError(error)) {
-      setMessage(
-        $("observationMessage"),
-        `Enregistrement impossible : ${error.message}`,
-        true
-      );
-      return;
-    }
-  }
-
-  if (!savedOnline) {
-    await queueObservation(localRecord);
-  }
-
-  populateYears(date.slice(0, 4));
-
-  const parcel = displayParcels().find(p => p.id === parcelId);
-  if (parcel) {
-    populateFarms(parcel.exploitation);
-    $("parcelSelect").value = parcel.id;
-  }
-
-  $("pestSelect").value = pest;
-  $("yearSelect").value = date.slice(0, 4);
-  $("observationCount").value = "";
-
-  refresh();
-
-  setMessage(
-    $("observationMessage"),
-    savedOnline
-      ? "Relevé enregistré."
-      : "Relevé enregistré hors connexion. Il sera synchronisé automatiquement."
-  );
-
-  if (!savedOnline) {
-    updateSyncStatus();
-  }
-}
-
-function exportCsv() {
-  const records = activeObservations();
-  const parcelMap = new Map(displayParcels().map(p => [p.id, p]));
-  const rows = [["Ravageur", "Année", "Exploitation", "Parcelle", "Variété", "Surface (ha)", "Date du relevé", "Captures"]];
-
-  records.forEach(r => {
-    const p = parcelMap.get(r.parcel_id);
-    rows.push([
-      PESTS[r.pest] || r.pest,
-      r.observed_on.slice(0, 4),
-      p?.exploitation || "",
-      p?.name || "",
-      p?.variety || "",
-      p?.area_ha ?? "",
-      r.observed_on,
-      r.captures
-    ]);
-  });
-
-  const quote = v => `"${String(v ?? "").replaceAll('"', '""')}"`;
-  const csv = "\ufeff" + rows.map(row => row.map(quote).join(";")).join("\r\n");
-  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `sam_piegeage_${$("yearSelect").value}.csv`;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
-}
-
 
 function renderParcelList() {
-  const container = $("parcelList");
-  if (!container) return;
-
-  container.innerHTML = "";
-
-  const list = displayParcels().slice().sort((a, b) =>
-    a.exploitation.localeCompare(b.exploitation, "fr") ||
-    a.name.localeCompare(b.name, "fr")
-  );
-
-  if (!list.length) {
-    const empty = document.createElement("div");
-    empty.className = "parcel-list-empty";
-    empty.textContent = "Aucune parcelle créée.";
-    container.appendChild(empty);
-    return;
-  }
-
-  list.forEach(parcel => {
-    const row = document.createElement("div");
-    row.className = "parcel-list-item";
-    if (parcel._pending) row.classList.add("pending-parcel");
-
-    const info = document.createElement("div");
-    info.className = "parcel-list-info";
-
-    const title = document.createElement("strong");
-    title.textContent = `${parcel.exploitation} — ${parcel.name}`;
-
-    const meta = document.createElement("span");
-    meta.textContent = `${parcel.variety} · ${formatNumber(parcel.area_ha, 2)} ha${parcel._pending ? " · En attente de synchronisation" : ""}`;
-
-    info.append(title, meta);
-
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "delete-parcel-button";
-    button.textContent = "Supprimer";
-    button.addEventListener("click", () => deleteParcel(parcel));
-
-    row.append(info, button);
-    container.appendChild(row);
+  const box = $("parcelManageList"); if (!box) return; box.innerHTML = "";
+  data.parcels.slice().sort((a,b)=>a.exploitation.localeCompare(b.exploitation,"fr")||a.name.localeCompare(b.name,"fr")).forEach(p => {
+    const item = managementItem(`${p.exploitation} — ${p.name}`, `${p.variety || ""} · ${fmtNumber(p.area_ha,2)} ha`, p.archived_at);
+    item.actions.append(button("Modifier","small-button",()=>openParcelDialog(p)),button(p.archived_at?"Restaurer":"Archiver",`small-button ${p.archived_at?"restore":"danger"}`,async()=>{await archiveRecord(TABLES.parcels,p,!p.archived_at);renderAll();}));
+    box.appendChild(item.root);
   });
 }
 
-async function deleteParcel(parcel) {
-  if (!currentUser) return;
-
-  const linkedObservations = displayObservations().filter(
-    record => record.parcel_id === parcel.id
-  );
-
-  const warning = linkedObservations.length
-    ? `Supprimer la parcelle « ${parcel.name} » et ses ${linkedObservations.length} relevé${linkedObservations.length > 1 ? "s" : ""} ?`
-    : `Supprimer la parcelle « ${parcel.name} » ?`;
-
-  if (!window.confirm(warning)) return;
-
-  if (parcel._pending) {
-    const pendingForParcel = pendingObservations.filter(
-      record => record.parcel_id === parcel.id
-    );
-
-    for (const record of pendingForParcel) {
-      await removePendingObservation(record.id);
-    }
-
-    await removePendingParcel(parcel.id);
-
-    populateFarms();
-    populateEntryFarms();
-    renderParcelList();
-    refresh();
-    setMessage($("parcelMessage"), "Parcelle supprimée.");
-    return;
-  }
-
-  if (!navigator.onLine) {
-    setMessage(
-      $("parcelMessage"),
-      "La suppression d’une parcelle déjà synchronisée nécessite une connexion internet.",
-      true
-    );
-    return;
-  }
-
-  const { error } = await db
-    .from("piegeage_parcels")
-    .delete()
-    .eq("id", parcel.id);
-
-  if (error) {
-    setMessage(
-      $("parcelMessage"),
-      `Suppression impossible : ${error.message}`,
-      true
-    );
-    return;
-  }
-
-  parcels = parcels.filter(item => item.id !== parcel.id);
-  observations = observations.filter(record => record.parcel_id !== parcel.id);
-
-  const pendingForParcel = pendingObservations.filter(
-    record => record.parcel_id === parcel.id
-  );
-  for (const record of pendingForParcel) {
-    await removePendingObservation(record.id);
-  }
-
-  await saveCachedData();
-
-  populateFarms();
-  populateEntryFarms();
-  renderParcelList();
-  refresh();
-
-  setMessage($("parcelMessage"), "Parcelle supprimée.");
-}
-
-function openParcelDialog() {
-  if (!currentUser) return;
-  setMessage($("parcelMessage"));
-  renderParcelList();
-  $("parcelDialog").showModal();
-}
-
-function openObservationDialog() {
-  if (!currentUser) return;
-  setMessage($("observationMessage"));
-
-  if (!displayParcels().length) {
-    setMessage($("globalMessage"), "Créez d’abord une parcelle.", true);
-    return;
-  }
-
-  const currentFarm = $("farmSelect").value;
-  const currentParcel = $("parcelSelect").value;
-  populateEntryFarms(currentFarm, currentParcel !== "all" ? currentParcel : null);
-  $("entryPest").value = $("pestSelect").value === "all"
-    ? "carpocapse"
-    : $("pestSelect").value;
-  $("observationDate").value = new Date().toISOString().slice(0, 10);
-  $("observationDialog").showModal();
-}
-
-
-function toggleMobileAuthCard() {
-  const card = $("authCard");
-  const button = $("authToggleButton");
-  if (!card || !button || window.innerWidth > 720) return;
-
-  const open = card.classList.toggle("open");
-  button.setAttribute("aria-expanded", String(open));
-}
-
-function closeMobileAuthCard() {
-  const card = $("authCard");
-  const button = $("authToggleButton");
-  if (!card || !button || window.innerWidth > 720) return;
-
-  card.classList.remove("open");
-  button.setAttribute("aria-expanded", "false");
-}
-
-function isAppMarkedInstalled() {
-  return window.localStorage.getItem(INSTALL_STORAGE_KEY) === "1";
-}
-
-function markAppInstalled() {
-  window.localStorage.setItem(INSTALL_STORAGE_KEY, "1");
-}
-
-function isStandalone() {
-  return window.matchMedia("(display-mode: standalone)").matches ||
-    window.navigator.standalone === true;
-}
-
-function isIOS() {
-  return /iphone|ipad|ipod/i.test(window.navigator.userAgent) ||
-    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-}
-
-function isMobileDevice() {
-  if (navigator.userAgentData &&
-      typeof navigator.userAgentData.mobile === "boolean") {
-    return navigator.userAgentData.mobile;
-  }
-
-  const ua = navigator.userAgent || "";
-  const mobileUa = /Android|iPhone|iPad|iPod|IEMobile|Opera Mini|Mobile/i.test(ua);
-  const iPadDesktopMode =
-    navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1;
-
-  return mobileUa || iPadDesktopMode;
-}
-
-function showInstallMessage(message) {
-  const box = $("installMessage");
-  if (!box) return;
-
-  box.textContent = message;
-  box.classList.remove("hidden");
-
-  window.clearTimeout(showInstallMessage.timer);
-  showInstallMessage.timer =
-    window.setTimeout(() => box.classList.add("hidden"), 7000);
-}
-
-async function installApp() {
-  if (isStandalone()) return;
-
-  if (deferredInstallPrompt) {
-    deferredInstallPrompt.prompt();
-    const result = await deferredInstallPrompt.userChoice;
-    deferredInstallPrompt = null;
-
-    if (result.outcome === "accepted") {
-      markAppInstalled();
-      $("installCard").classList.add("hidden");
-    }
-    return;
-  }
-
-  if (isIOS()) {
-    showInstallMessage(
-      "Sur iPhone/iPad : ouvre cette page dans Safari, touche Partager, puis « Sur l’écran d’accueil »."
-    );
-  } else {
-    showInstallMessage(
-      "Si l’installation ne s’ouvre pas, utilise le menu du navigateur puis « Installer l’application » ou « Ajouter à l’écran d’accueil »."
-    );
-  }
-}
-
-function initPWA() {
-  const installCard = $("installCard");
-  const installButton = $("installButton");
-  const mobile = isMobileDevice();
-
-  if (!installCard || !installButton) return;
-
-  if (isStandalone()) {
-    markAppInstalled();
-  }
-
-  const alreadyInstalled = isStandalone() || isAppMarkedInstalled();
-
-  if (!mobile || alreadyInstalled) {
-    installCard.classList.add("hidden");
-  } else {
-    installCard.classList.remove("hidden");
-  }
-
-  window.addEventListener("beforeinstallprompt", event => {
-    event.preventDefault();
-    deferredInstallPrompt = event;
-
-    if (mobile && !isStandalone() && !isAppMarkedInstalled()) {
-      installCard.classList.remove("hidden");
-      installButton.classList.remove("hidden");
-    }
+function renderTrapList() {
+  const box = $("trapManageList"); if (!box) return; box.innerHTML = "";
+  data.traps.slice().sort((a,b)=>String(a.code).localeCompare(String(b.code),"fr")).forEach(t => {
+    const p=parcelById(t.parcel_id), c=campaignById(t.campaign_id); const item=managementItem(`${p?.name||"—"} — ${t.code}`, `${c?.name||"—"} · ${t.trap_type||"Type non renseigné"}`,t.archived_at);
+    item.actions.append(button("Modifier","small-button",()=>openTrapDialog(t)),button("Événement","small-button",()=>openTrapEventDialog(t)),button(t.archived_at?"Restaurer":"Archiver",`small-button ${t.archived_at?"restore":"danger"}`,async()=>{await archiveRecord(TABLES.traps,t,!t.archived_at);renderAll();})); box.appendChild(item.root);
   });
+}
 
-  const standaloneMedia = window.matchMedia("(display-mode: standalone)");
-  const handleDisplayModeChange = () => {
-    if (isStandalone()) {
-      markAppInstalled();
-      installCard.classList.add("hidden");
-    }
-  };
+function renderSpeciesList() {
+  const box=$("speciesManageList"); if(!box)return; box.innerHTML="";
+  data.species.slice().sort((a,b)=>a.scientific_name.localeCompare(b.scientific_name,"fr")).forEach(s=>{const item=managementItem(s.scientific_name,s.common_name||"",s.active===false);item.actions.append(button(s.active===false?"Réactiver":"Désactiver",`small-button ${s.active===false?"restore":"danger"}`,async()=>{await writeRecord(TABLES.species,{...s,active:s.active===false,updated_at:new Date().toISOString()});renderAll();}));box.appendChild(item.root);});
+}
 
-  if (standaloneMedia.addEventListener) {
-    standaloneMedia.addEventListener("change", handleDisplayModeChange);
-  }
+function openArchivesDialog(){renderArchiveLists();$("archivesDialog").showModal();}
+function renderArchiveLists(){
+  const obsBox=$("archivedObservationList"), intBox=$("archivedInterventionList"), eventBox=$("archivedTrapEventList");
+  obsBox.innerHTML="";intBox.innerHTML="";eventBox.innerHTML="";
+  const archivedObs=data.observations.filter(o=>o.archived_at).sort((a,b)=>b.observed_on.localeCompare(a.observed_on));
+  if(!archivedObs.length)obsBox.innerHTML='<div class="history-empty">Aucun relevé archivé.</div>';
+  archivedObs.forEach(o=>{const t=trapById(o.trap_id),p=parcelById(t?.parcel_id);const item=managementItem(`${fmtDate(o.observed_on)} — ${p?.name||"—"} — ${t?.code||"—"}`,`${o.total_captured} captures`,true);item.actions.append(button("Restaurer","small-button restore",async()=>{await archiveRecord(TABLES.observations,o,false);renderAll();renderArchiveLists();}));obsBox.appendChild(item.root);});
+  const archivedInts=data.interventions.filter(i=>i.archived_at).sort((a,b)=>b.intervention_date.localeCompare(a.intervention_date));
+  if(!archivedInts.length)intBox.innerHTML='<div class="history-empty">Aucune intervention archivée.</div>';
+  archivedInts.forEach(i=>{const item=managementItem(`${fmtDate(i.intervention_date)} — ${i.intervention_type}`,i.product||"",true);item.actions.append(button("Restaurer","small-button restore",async()=>{await archiveRecord(TABLES.interventions,i,false);renderAll();renderArchiveLists();}));intBox.appendChild(item.root);});
+  const archivedEvents=data.trapEvents.filter(e=>e.archived_at).sort((a,b)=>b.event_date.localeCompare(a.event_date));
+  if(!archivedEvents.length)eventBox.innerHTML='<div class="history-empty">Aucun événement de piège archivé.</div>';
+  archivedEvents.forEach(e=>{const t=trapById(e.trap_id);const item=managementItem(`${fmtDate(e.event_date)} — ${t?.code||"—"}`,e.label||e.event_type,true);item.actions.append(button("Restaurer","small-button restore",async()=>{await archiveRecord(TABLES.trapEvents,e,false);renderAll();renderArchiveLists();}));eventBox.appendChild(item.root);});
+}
 
-  window.addEventListener("appinstalled", () => {
-    deferredInstallPrompt = null;
-    markAppInstalled();
-    installCard.classList.add("hidden");
-  });
+function managementItem(title, subtitle, archived) {
+  const root=document.createElement("div");root.className=`management-item${archived?" archived":""}`;const info=document.createElement("div");info.className="management-info";info.innerHTML=`<strong>${escapeHtml(title)}</strong><span>${escapeHtml(subtitle)}${archived?" · ARCHIVÉ":""}</span>`;const actions=document.createElement("div");actions.className="management-actions";root.append(info,actions);return{root,actions};
+}
 
-  if ("serviceWorker" in navigator) {
-    window.addEventListener("load", async () => {
-      try {
-        const registration =
-          await navigator.serviceWorker.register("./service-worker.js");
-        await registration.update();
-      } catch (error) {
-        console.warn("Service worker non enregistré :", error);
-      }
+// -----------------------------------------------------------------------------
+// Campagnes
+// -----------------------------------------------------------------------------
+function renderCampaignSpeciesChoices(selectedIds = []) {
+  const box=$("campaignSpeciesChoices");box.innerHTML="";
+  data.species.filter(s=>s.active!==false).forEach(s=>{const label=document.createElement("label");label.className="checkbox-card";label.innerHTML=`<input type="checkbox" value="${s.id}" ${selectedIds.includes(s.id)?"checked":""}> <span><b>${escapeHtml(s.scientific_name)}</b>${s.common_name?`<br><small>${escapeHtml(s.common_name)}</small>`:""}</span>`;box.appendChild(label);});
+}
+
+function toggleCampaignSpeciesSection(){const aphid=$("campaignProtocol").value==="aphid";$("campaignSpeciesSection").classList.toggle("hidden",!aphid);if(aphid&&!$("campaignId").value&&!$("campaignSpeciesChoices").querySelector("input:checked"))$("campaignSpeciesChoices").querySelectorAll("input").forEach(input=>input.checked=true);}
+
+function openCampaignDialog(campaign=null){$("campaignForm").reset();$("campaignId").value=campaign?.id||"";$("campaignName").value=campaign?.name||"";$("campaignYear").value=campaign?.year||new Date().getFullYear();$("campaignPest").value=campaign?.pest_label||"";$("campaignProtocol").value=campaign?.protocol_type||"simple";$("campaignStart").value=campaign?.start_date||"";$("campaignEnd").value=campaign?.end_date||"";const selected=campaign?data.campaignSpecies.filter(l=>l.campaign_id===campaign.id&&l.active!==false).map(l=>l.species_id):[];renderCampaignSpeciesChoices(selected);toggleCampaignSpeciesSection();setMessage($("campaignMessage"));renderCampaignList();$("campaignDialog").showModal();}
+
+async function saveCampaign(event){event.preventDefault();const existing=campaignById($("campaignId").value);const id=existing?.id||uuid();const payload={id,name:$("campaignName").value.trim(),year:Number($("campaignYear").value),pest_label:$("campaignPest").value.trim(),protocol_type:$("campaignProtocol").value,start_date:$("campaignStart").value||null,end_date:$("campaignEnd").value||null,legacy_key:existing?.legacy_key||null,archived_at:existing?.archived_at||null,created_by:existing?.created_by||currentUser.id,created_at:existing?.created_at||new Date().toISOString(),updated_at:new Date().toISOString()};
+  try{await writeRecord(TABLES.campaigns,payload);if(payload.protocol_type==="aphid"){const selected=[...$("campaignSpeciesChoices").querySelectorAll('input:checked')].map(i=>i.value);for(const s of data.species){let link=data.campaignSpecies.find(l=>l.campaign_id===id&&l.species_id===s.id);if(link){await writeRecord(TABLES.campaignSpecies,{...link,active:selected.includes(s.id)});}else if(selected.includes(s.id)){await writeRecord(TABLES.campaignSpecies,{id:uuid(),campaign_id:id,species_id:s.id,active:true,created_at:new Date().toISOString()});}}}setMessage($("campaignMessage"),navigator.onLine?"Campagne enregistrée.":"Campagne enregistrée hors connexion.");renderAll();renderCampaignList();}catch(error){setMessage($("campaignMessage"),error.message||"Enregistrement impossible.",true);}}
+
+// -----------------------------------------------------------------------------
+// Parcelles
+// -----------------------------------------------------------------------------
+function openParcelDialog(parcel=null){$("parcelForm").reset();$("parcelId").value=parcel?.id||"";$("parcelFarm").value=parcel?.exploitation||"";$("parcelName").value=parcel?.name||"";$("parcelVariety").value=parcel?.variety||"";$("parcelArea").value=parcel?.area_ha??"";setMessage($("parcelMessage"));renderParcelList();$("parcelDialog").showModal();}
+async function saveParcel(event){event.preventDefault();const existing=parcelById($("parcelId").value);const payload={id:existing?.id||uuid(),exploitation:$("parcelFarm").value.trim(),name:$("parcelName").value.trim(),variety:$("parcelVariety").value.trim(),area_ha:Number($("parcelArea").value),created_by:existing?.created_by||currentUser.id,created_at:existing?.created_at||new Date().toISOString(),archived_at:existing?.archived_at||null,updated_at:new Date().toISOString()};try{await writeRecord(TABLES.parcels,payload);setMessage($("parcelMessage"),navigator.onLine?"Parcelle enregistrée.":"Parcelle enregistrée hors connexion.");renderAll();renderParcelList();}catch(error){setMessage($("parcelMessage"),error.message||"Enregistrement impossible.",true);}}
+
+// -----------------------------------------------------------------------------
+// Pièges et événements
+// -----------------------------------------------------------------------------
+function openTrapDialog(trap=null){$("trapForm").reset();populateAdminSelects();$("trapId").value=trap?.id||"";$("trapCampaign").value=trap?.campaign_id||$("campaignFilter").value;populateTrapParcelSelect();$("trapParcel").value=trap?.parcel_id||"";$("trapCode").value=trap?.code||"";$("trapType").value=trap?.trap_type||"";$("trapRow").value=trap?.row_ref||"";$("trapPosition").value=trap?.position||"";$("trapInstalled").value=trap?.installed_on||todayISO();$("trapAttractant").value=trap?.attractant||"";$("trapComment").value=trap?.comment||"";setMessage($("trapMessage"));renderTrapList();$("trapDialog").showModal();}
+async function saveTrap(event){event.preventDefault();const existing=data.traps.find(t=>t.id===$("trapId").value);const payload={id:existing?.id||uuid(),campaign_id:$("trapCampaign").value,parcel_id:$("trapParcel").value,code:$("trapCode").value.trim(),trap_type:$("trapType").value.trim()||null,row_ref:$("trapRow").value.trim()||null,position:$("trapPosition").value.trim()||null,installed_on:$("trapInstalled").value||null,removed_on:existing?.removed_on||null,attractant:$("trapAttractant").value.trim()||null,comment:$("trapComment").value.trim()||null,archived_at:existing?.archived_at||null,created_by:existing?.created_by||currentUser.id,created_at:existing?.created_at||new Date().toISOString(),updated_at:new Date().toISOString()};try{await writeRecord(TABLES.traps,payload);let link=data.campaignParcels.find(l=>l.campaign_id===payload.campaign_id&&l.parcel_id===payload.parcel_id);if(!link)await writeRecord(TABLES.campaignParcels,{id:uuid(),campaign_id:payload.campaign_id,parcel_id:payload.parcel_id,modality:null,created_at:new Date().toISOString()});if(!existing&&payload.installed_on)await writeRecord(TABLES.trapEvents,{id:uuid(),trap_id:payload.id,event_date:payload.installed_on,event_type:"installation",label:"Installation du piège",comment:payload.comment,archived_at:null,created_by:currentUser.id,created_at:new Date().toISOString(),updated_at:new Date().toISOString()});setMessage($("trapMessage"),navigator.onLine?"Piège enregistré.":"Piège enregistré hors connexion.");renderAll();renderTrapList();}catch(error){setMessage($("trapMessage"),error.message||"Enregistrement impossible.",true);}}
+function openTrapEventDialog(trap=null){populateEventTrapSelect();if(trap)$("eventTrap").value=trap.id;$("eventDate").value=todayISO();$("eventType").value="replacement";$("eventLabel").value="";$("eventComment").value="";setMessage($("eventMessage"));$("trapEventDialog").showModal();}
+async function saveTrapEvent(event){event.preventDefault();const payload={id:uuid(),trap_id:$("eventTrap").value,event_date:$("eventDate").value,event_type:$("eventType").value,label:$("eventLabel").value.trim()||null,comment:$("eventComment").value.trim()||null,archived_at:null,created_by:currentUser.id,created_at:new Date().toISOString(),updated_at:new Date().toISOString()};try{await writeRecord(TABLES.trapEvents,payload);if(payload.event_type==="replacement"){const trap=trapById(payload.trap_id);if(trap)await writeRecord(TABLES.traps,{...trap,installed_on:payload.event_date,updated_at:new Date().toISOString()});}setMessage($("eventMessage"),navigator.onLine?"Événement enregistré.":"Événement enregistré hors connexion.");renderAll();}catch(error){setMessage($("eventMessage"),error.message||"Enregistrement impossible.",true);}}
+
+// -----------------------------------------------------------------------------
+// Relevés / identification
+// -----------------------------------------------------------------------------
+function renderObservationSpeciesRows(existingDetails=[]){const campaign=campaignById($("observationCampaign")?.value);const section=$("aphidDetailSection");const box=$("aphidSpeciesRows");if(!campaign||campaign.protocol_type!=="aphid"){section.classList.add("hidden");box.innerHTML="";return;}section.classList.remove("hidden");box.innerHTML="";campaignSpecies(campaign.id).forEach(s=>{const d=existingDetails.find(x=>x.species_id===s.id);const row=document.createElement("div");row.className="species-detail-row";row.dataset.speciesId=s.id;row.innerHTML=`<div class="species-name"><strong>${escapeHtml(s.scientific_name)}</strong><span>${escapeHtml(s.common_name||"")}</span></div><label>Mâles<input class="male-input" type="number" min="0" step="1" value="${d?.males||0}"></label><label>Femelles<input class="female-input" type="number" min="0" step="1" value="${d?.females||0}"></label><label>Indéterminés<input class="undetermined-input" type="number" min="0" step="1" value="${d?.undetermined||0}"></label>`;box.appendChild(row);});updateIdentificationSummary();}
+function updateIdentificationSummary(){const rows=[...$("aphidSpeciesRows").querySelectorAll(".species-detail-row")];const identified=rows.reduce((sum,row)=>sum+Number(row.querySelector(".male-input").value||0)+Number(row.querySelector(".female-input").value||0)+Number(row.querySelector(".undetermined-input").value||0),0);const total=Number($("observationTotal").value||0);$("identificationSummary").textContent=`${identified} identifié${identified>1?"s":""} · ${Math.max(0,total-identified)} restant${Math.max(0,total-identified)>1?"s":""}`;$("identificationSummary").classList.toggle("over",identified>total);}
+function openObservationDialog(obs=null){$("observationForm").reset();$("observationId").value=obs?.id||"";$("observationDialogTitle").textContent=obs?"Modifier / compléter le relevé":"Ajouter un relevé";populateAdminSelects();const campaignId=obs?.campaign_id||$("campaignFilter").value||activeCampaigns()[0]?.id;$("observationCampaign").value=campaignId||"";const trap=obs?trapById(obs.trap_id):null;populateObservationParcelSelect(trap?.parcel_id||($("parcelFilter").value!=="all"?$("parcelFilter").value:null),obs?.trap_id||($("trapFilter").value!=="all"?$("trapFilter").value:null));$("observationDate").value=obs?.observed_on||todayISO();$("observationTotal").value=obs?.total_captured??"";$("observationComment").value=obs?.comment||"";renderObservationSpeciesRows(obs?detailsForObservation(obs.id):[]);setMessage($("observationMessage"));$("observationDialog").showModal();}
+async function saveObservation(event){event.preventDefault();const existing=data.observations.find(o=>o.id===$("observationId").value);const campaign=campaignById($("observationCampaign").value);const total=Number($("observationTotal").value);if(!campaign||!$("observationTrap").value||!Number.isInteger(total)||total<0)return setMessage($("observationMessage"),"Renseigne correctement la campagne, le piège, la date et le total.",true);const detailRows=[...$("aphidSpeciesRows").querySelectorAll(".species-detail-row")].map(row=>({species_id:row.dataset.speciesId,males:Number(row.querySelector(".male-input").value||0),females:Number(row.querySelector(".female-input").value||0),undetermined:Number(row.querySelector(".undetermined-input").value||0)}));const identified=detailRows.reduce((s,d)=>s+d.males+d.females+d.undetermined,0);if(campaign.protocol_type==="aphid"&&identified>total)return setMessage($("observationMessage"),`Impossible : ${identified} individus sont identifiés alors que le total capturé est ${total}.`,true);const status=campaign.protocol_type!=="aphid"?"not_applicable":identified===0?"not_started":identified<total?"partial":"complete";const payload={id:existing?.id||uuid(),campaign_id:campaign.id,trap_id:$("observationTrap").value,observed_on:$("observationDate").value,total_captured:total,identification_status:status,comment:$("observationComment").value.trim()||null,legacy_source_id:existing?.legacy_source_id||null,archived_at:existing?.archived_at||null,created_by:existing?.created_by||currentUser.id,created_at:existing?.created_at||new Date().toISOString(),updated_at:new Date().toISOString()};try{await writeRecord(TABLES.observations,payload);if(campaign.protocol_type==="aphid"){for(const d of detailRows){const old=data.details.find(x=>x.observation_id===payload.id&&x.species_id===d.species_id);await writeRecord(TABLES.details,{id:old?.id||uuid(),observation_id:payload.id,species_id:d.species_id,males:d.males,females:d.females,undetermined:d.undetermined,created_at:old?.created_at||new Date().toISOString(),updated_at:new Date().toISOString()});}}setMessage($("observationMessage"),navigator.onLine?"Relevé enregistré.":"Relevé enregistré hors connexion. Il sera synchronisé automatiquement.");$("campaignFilter").value=campaign.id;populateParcelFilter();renderAll();}catch(error){setMessage($("observationMessage"),error.message||"Enregistrement impossible.",true);}}
+
+// -----------------------------------------------------------------------------
+// Interventions
+// -----------------------------------------------------------------------------
+function renderInterventionParcelChoices(campaignId,selected=[]){const box=$("interventionParcelChoices");box.innerHTML="";parcelsForCampaign(campaignId).forEach(p=>{const label=document.createElement("label");label.className="checkbox-card";label.innerHTML=`<input type="checkbox" value="${p.id}" ${selected.includes(p.id)?"checked":""}> <span>${escapeHtml(p.name)} — ${escapeHtml(p.variety||"")}</span>`;box.appendChild(label);});}
+function openInterventionDialog(){const campaignId=$("campaignFilter").value||activeCampaigns()[0]?.id;populateAdminSelects();$("interventionCampaign").value=campaignId||"";$("interventionDate").value=todayISO();$("interventionTime").value="";$("interventionType").value="Traitement";$("interventionProduct").value="";$("interventionDose").value="";$("interventionTarget").value="";$("interventionComment").value="";renderInterventionParcelChoices(campaignId,[]);setMessage($("interventionMessage"));$("interventionDialog").showModal();}
+async function saveIntervention(event){event.preventDefault();const id=uuid();const payload={id,campaign_id:$("interventionCampaign").value,intervention_date:$("interventionDate").value,intervention_time:$("interventionTime").value||null,intervention_type:$("interventionType").value.trim(),product:$("interventionProduct").value.trim()||null,dose:$("interventionDose").value.trim()||null,target:$("interventionTarget").value.trim()||null,comment:$("interventionComment").value.trim()||null,archived_at:null,created_by:currentUser.id,created_at:new Date().toISOString(),updated_at:new Date().toISOString()};try{await writeRecord(TABLES.interventions,payload);const parcels=[...$("interventionParcelChoices").querySelectorAll('input:checked')].map(i=>i.value);for(const parcelId of parcels)await writeRecord(TABLES.interventionParcels,{id:uuid(),intervention_id:id,parcel_id:parcelId,created_at:new Date().toISOString()});setMessage($("interventionMessage"),navigator.onLine?"Intervention enregistrée.":"Intervention enregistrée hors connexion.");renderAll();}catch(error){setMessage($("interventionMessage"),error.message||"Enregistrement impossible.",true);}}
+
+// -----------------------------------------------------------------------------
+// Espèces
+// -----------------------------------------------------------------------------
+function openSpeciesDialog(){renderSpeciesList();setMessage($("speciesMessage"));$("speciesDialog").showModal();}
+async function saveSpecies(event){event.preventDefault();const scientific=$("speciesScientific").value.trim();const common=$("speciesCommon").value.trim();if(!scientific)return;const existing=data.species.find(s=>s.code===slugify(scientific));if(existing)return setMessage($("speciesMessage"),"Cette espèce existe déjà.",true);const payload={id:uuid(),code:slugify(scientific),scientific_name:scientific,common_name:common||null,active:true,created_by:currentUser.id,created_at:new Date().toISOString(),updated_at:new Date().toISOString()};try{await writeRecord(TABLES.species,payload);$("speciesForm").reset();setMessage($("speciesMessage"),"Espèce ajoutée.");renderAll();renderSpeciesList();}catch(error){setMessage($("speciesMessage"),error.message||"Enregistrement impossible.",true);}}
+
+// -----------------------------------------------------------------------------
+// Export Excel — structure proche du classeur de Bertrand
+// -----------------------------------------------------------------------------
+function exportExcel() {
+  if (!window.XLSX) return setMessage($("globalMessage"), "Bibliothèque d’export Excel indisponible.", true);
+  const campaign = campaignById($("campaignFilter").value); if (!campaign) return;
+  const traps = trapsForCampaign(campaign.id); const observations = activeRows(data.observations).filter(o=>o.campaign_id===campaign.id).sort((a,b)=>a.observed_on.localeCompare(b.observed_on));
+  const dates=[...new Set(observations.map(o=>o.observed_on))].sort();
+  const rows=[];
+  rows.push([campaign.name]);
+  rows.push(["Parcelle / piège","Mesure",...dates.map(fmtDate)]);
+
+  traps.forEach(trap=>{
+    const parcel=parcelById(trap.parcel_id);const trapObs=observations.filter(o=>o.trap_id===trap.id);
+    const valueByDate=(date,fn)=>{const obs=trapObs.find(o=>o.observed_on===date);return obs?fn(obs):"";};
+    rows.push([`${parcel?.name||""} (${parcel?.variety||""}) — ${trap.code}`,"Total",...dates.map(d=>valueByDate(d,o=>o.total_captured))]);
+    if(campaign.protocol_type==="aphid")campaignSpecies(campaign.id).forEach(s=>{
+      const detailVal=(obs,key)=>{const det=data.details.find(x=>x.observation_id===obs.id&&x.species_id===s.id);return det?Number(det[key]||0):"";};
+      rows.push(["",`${s.scientific_name} — M`,...dates.map(d=>valueByDate(d,o=>detailVal(o,"males")))]);
+      rows.push(["",`${s.scientific_name} — F`,...dates.map(d=>valueByDate(d,o=>detailVal(o,"females")))]);
+      rows.push(["",`${s.scientific_name} — I`,...dates.map(d=>valueByDate(d,o=>detailVal(o,"undetermined")))]);
     });
-  }
+    rows.push([]);
+  });
+
+  const anchor=campaignAnchor(campaign,observations);const weeks=[...new Set(observations.map(o=>bucketStart(o.observed_on,anchor)))].sort();
+  rows.push([]);rows.push(["TOTAUX HEBDOMADAIRES ET LISSAGE"]);rows.push(["Parcelle / piège","Mesure",...weeks.map(w=>fmtDate(w))]);
+  traps.forEach(trap=>{const parcel=parcelById(trap.parcel_id);const trapObs=observations.filter(o=>o.trap_id===trap.id);const totals=weeks.map(w=>trapObs.filter(o=>bucketStart(o.observed_on,anchor)===w).reduce((sum,o)=>sum+Number(o.total_captured||0),0));const smooth=totals.map((v,i)=>i===0?v:(v+totals[i-1])/2);rows.push([`${parcel?.name||""} — ${trap.code}`,"Total hebdomadaire",...totals]);rows.push(["","Total lissé",...smooth]);if(campaign.protocol_type==="aphid")campaignSpecies(campaign.id).forEach(s=>{const weekly=weeks.map(w=>trapObs.filter(o=>bucketStart(o.observed_on,anchor)===w).reduce((sum,o)=>{const d=data.details.find(x=>x.observation_id===o.id&&x.species_id===s.id);return sum+(d?Number(d.males||0)+Number(d.females||0)+Number(d.undetermined||0):0);},0));const sm=weekly.map((v,i)=>i===0?v:(v+weekly[i-1])/2);rows.push(["",s.scientific_name,...weekly]);rows.push(["",`${s.scientific_name} lissé`,...sm]);});rows.push([]);});
+
+  const wb=XLSX.utils.book_new();const ws=XLSX.utils.aoa_to_sheet(rows);ws["!cols"]=[{wch:34},{wch:30},...dates.map(()=>({wch:12}))];XLSX.utils.book_append_sheet(wb,ws,(campaign.name||"Campagne").slice(0,31));
+  const trapRows=[["Campagne","Parcelle","Variété","Piège","Type","Rang","Position","Installation","Attractif","Commentaire"],...traps.map(t=>{const p=parcelById(t.parcel_id);return[campaign.name,p?.name||"",p?.variety||"",t.code,t.trap_type||"",t.row_ref||"",t.position||"",t.installed_on||"",t.attractant||"",t.comment||""];})];XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(trapRows),"Pièges");
+  const interventionRows=[["Date","Heure","Type","Produit","Dose","Cible","Parcelles","Commentaire"],...activeRows(data.interventions).filter(i=>i.campaign_id===campaign.id).map(i=>{const ids=data.interventionParcels.filter(l=>l.intervention_id===i.id).map(l=>l.parcel_id);return[i.intervention_date,i.intervention_time||"",i.intervention_type,i.product||"",i.dose||"",i.target||"",ids.map(id=>parcelById(id)?.name).filter(Boolean).join(", "),i.comment||""];})];XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(interventionRows),"Interventions");
+  XLSX.writeFile(wb,`SAM_Piegeage_${slugify(campaign.name)}_${campaign.year}.xlsx`);
 }
 
+// -----------------------------------------------------------------------------
+// Mobile / PWA
+// -----------------------------------------------------------------------------
+function toggleMobileAuthCard(){if(innerWidth>720)return;const card=$("authCard");const open=card.classList.toggle("open");$("authToggleButton").setAttribute("aria-expanded",String(open));}
+function closeMobileAuthCard(){if(innerWidth>720)return;$("authCard").classList.remove("open");$("authToggleButton").setAttribute("aria-expanded","false");}
+function isStandalone(){return matchMedia("(display-mode: standalone)").matches||navigator.standalone===true;}
+function isIOS(){return /iphone|ipad|ipod/i.test(navigator.userAgent)||(navigator.platform==="MacIntel"&&navigator.maxTouchPoints>1);}
+function isMobile(){return /Android|iPhone|iPad|iPod|IEMobile|Opera Mini|Mobile/i.test(navigator.userAgent)||(navigator.platform==="MacIntel"&&navigator.maxTouchPoints>1);}
+function showInstallMessage(message){$("installMessage").textContent=message;$("installMessage").classList.remove("hidden");setTimeout(()=>$("installMessage").classList.add("hidden"),7000);}
+async function installApp(){if(deferredInstallPrompt){deferredInstallPrompt.prompt();const result=await deferredInstallPrompt.userChoice;deferredInstallPrompt=null;if(result.outcome==="accepted"){localStorage.setItem(INSTALL_STORAGE_KEY,"1");$("installCard").classList.add("hidden");}return;}if(isIOS())showInstallMessage("Sur iPhone/iPad : dans Safari, touche Partager puis « Sur l’écran d’accueil ». ");else showInstallMessage("Utilise le menu du navigateur puis « Installer l’application » ou « Ajouter à l’écran d’accueil ». ");}
+function initPWA(){const card=$("installCard");if(isStandalone())localStorage.setItem(INSTALL_STORAGE_KEY,"1");card.classList.toggle("hidden",!isMobile()||isStandalone()||localStorage.getItem(INSTALL_STORAGE_KEY)==="1");addEventListener("beforeinstallprompt",e=>{e.preventDefault();deferredInstallPrompt=e;if(isMobile()&&!isStandalone())card.classList.remove("hidden");});addEventListener("appinstalled",()=>{localStorage.setItem(INSTALL_STORAGE_KEY,"1");card.classList.add("hidden");});if("serviceWorker"in navigator)addEventListener("load",()=>navigator.serviceWorker.register("./service-worker.js").catch(console.warn));}
 
+// -----------------------------------------------------------------------------
+// Événements UI
+// -----------------------------------------------------------------------------
 function bind() {
-  $("installButton").addEventListener("click", installApp);
-  $("authToggleButton").addEventListener("click", toggleMobileAuthCard);
-  $("loginForm").addEventListener("submit", login);
-  $("logoutButton").addEventListener("click", logout);
-
-  $("addParcelButton").addEventListener("click", openParcelDialog);
-  $("addObservationButton").addEventListener("click", openObservationDialog);
-  $("closeParcelDialog").addEventListener("click", () => $("parcelDialog").close());
-  $("closeObservationDialog").addEventListener("click", () => $("observationDialog").close());
-
-  $("parcelForm").addEventListener("submit", createParcel);
-  $("observationForm").addEventListener("submit", createObservation);
-
-  $("entryFarm").addEventListener("change", () => populateEntryParcels());
-
-  $("pestSelect").addEventListener("change", refresh);
-  $("yearSelect").addEventListener("change", refresh);
-  $("calculationSelect").addEventListener("change", refresh);
-  $("displaySelect").addEventListener("change", refresh);
-
-  $("farmSelect").addEventListener("change", () => {
-    populateParcelFilter("all");
-    refresh();
-  });
-  $("parcelSelect").addEventListener("change", refresh);
-
-  $("exportCsvButton").addEventListener("click", exportCsv);
-
-  window.addEventListener("offline", () => {
-    updateSyncStatus();
-  });
-
-  window.addEventListener("online", async () => {
-    updateSyncStatus("Connexion retrouvée — synchronisation…", "syncing");
-    await syncPendingData();
-    await loadData();
-  });
-
-  [$("parcelDialog"), $("observationDialog")].forEach(dialog => {
-    dialog.addEventListener("click", e => {
-      if (e.target === dialog) dialog.close();
-    });
-  });
+  $("loginForm").addEventListener("submit",login);$("logoutButton").addEventListener("click",logout);$("authToggleButton").addEventListener("click",toggleMobileAuthCard);$("installButton").addEventListener("click",installApp);
+  $("campaignFilter").addEventListener("change",()=>{populateParcelFilter();populateAdminSelects();renderDashboard();});$("parcelFilter").addEventListener("change",()=>{populateTrapFilter();renderDashboard();});$("trapFilter").addEventListener("change",renderDashboard);$("speciesFilter").addEventListener("change",populateSpeciesFilter);$("sexFilter").addEventListener("change",renderDashboard);$("unitFilter").addEventListener("change",renderDashboard);$("processingFilter").addEventListener("change",renderDashboard);$("exportExcelButton").addEventListener("click",exportExcel);
+  $("newCampaignButton").addEventListener("click",()=>openCampaignDialog());$("newParcelButton").addEventListener("click",()=>openParcelDialog());$("newTrapButton").addEventListener("click",()=>openTrapDialog());$("newObservationButton").addEventListener("click",()=>openObservationDialog());$("newInterventionButton").addEventListener("click",openInterventionDialog);$("speciesButton").addEventListener("click",openSpeciesDialog);$("archivesButton").addEventListener("click",openArchivesDialog);
+  $("campaignForm").addEventListener("submit",saveCampaign);$("parcelForm").addEventListener("submit",saveParcel);$("trapForm").addEventListener("submit",saveTrap);$("trapEventForm").addEventListener("submit",saveTrapEvent);$("observationForm").addEventListener("submit",saveObservation);$("interventionForm").addEventListener("submit",saveIntervention);$("speciesForm").addEventListener("submit",saveSpecies);
+  $("campaignProtocol").addEventListener("change",toggleCampaignSpeciesSection);$("trapCampaign").addEventListener("change",populateTrapParcelSelect);$("observationCampaign").addEventListener("change",()=>populateObservationParcelSelect());$("observationParcel").addEventListener("change",()=>populateObservationTrapSelect());$("observationTotal").addEventListener("input",updateIdentificationSummary);$("aphidSpeciesRows").addEventListener("input",updateIdentificationSummary);$("interventionCampaign").addEventListener("change",()=>renderInterventionParcelChoices($("interventionCampaign").value,[]));
+  document.querySelectorAll("[data-close]").forEach(btn=>btn.addEventListener("click",()=>$(btn.dataset.close).close()));document.querySelectorAll("dialog").forEach(dialog=>dialog.addEventListener("click",event=>{if(event.target===dialog)dialog.close();}));
+  addEventListener("offline",updateSyncStatus);addEventListener("online",async()=>{updateSyncStatus("Connexion retrouvée — synchronisation…","syncing");await syncQueue();});
 }
 
-document.addEventListener("DOMContentLoaded", async () => {
-  bind();
-  initPWA();
-  updateSyncStatus();
-  await init();
-});
+document.addEventListener("DOMContentLoaded",async()=>{bind();initPWA();updateSyncStatus();await init();});
