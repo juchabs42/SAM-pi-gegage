@@ -126,3 +126,200 @@ footer{display:flex;justify-content:space-between;gap:20px;padding:24px clamp(18
     min-height: 48px;
   }
 }
+
+
+/* =========================================================
+   Import Excel + export SVG
+   ========================================================= */
+.export-actions {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.export-actions .export-button {
+  min-width: 118px;
+  white-space: nowrap;
+}
+
+.excel-import-card {
+  padding: 14px;
+  border: 1px solid #efd1da;
+  border-radius: 13px;
+  background: linear-gradient(180deg, #fff 0%, #fff8fa 100%);
+}
+
+.excel-import-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: start;
+}
+
+.excel-import-header h3 {
+  margin: 4px 0 5px;
+  font-size: 1.02rem;
+}
+
+.excel-import-header p {
+  margin: 0;
+  color: var(--muted);
+  font-size: .84rem;
+}
+
+.excel-file-button {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 0 13px;
+  border: 1px solid var(--brand);
+  border-radius: 9px;
+  color: var(--brand);
+  background: #fff;
+  font-weight: 800 !important;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.excel-file-button:hover {
+  color: #fff;
+  background: var(--brand);
+}
+
+.excel-file-button input {
+  display: none;
+}
+
+.excel-format-example {
+  display: grid;
+  gap: 3px;
+  margin-top: 11px;
+  padding: 10px 11px;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #fff;
+  color: #47515b;
+  font-size: .77rem;
+}
+
+.excel-format-example code {
+  white-space: nowrap;
+}
+
+.excel-import-help {
+  margin: 9px 0 0;
+  color: var(--muted);
+  font-size: .78rem;
+}
+
+.excel-import-preview {
+  margin-top: 12px;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.excel-import-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-bottom: 8px;
+}
+
+.excel-import-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 27px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #eef2f4;
+  color: #46515a;
+  font-size: .74rem;
+  font-weight: 800;
+}
+
+.excel-import-badge.good {
+  color: #1f6f4f;
+  background: #e8f5ee;
+}
+
+.excel-import-badge.warning {
+  color: #8c5a11;
+  background: #fff3d8;
+}
+
+.excel-import-badge.error {
+  color: #9d1639;
+  background: #fff0f4;
+}
+
+.excel-import-errors,
+.excel-import-warnings {
+  margin: 7px 0 0;
+  padding-left: 19px;
+  font-size: .78rem;
+}
+
+.excel-import-errors {
+  color: #9d1639;
+}
+
+.excel-import-warnings {
+  color: #8c5a11;
+}
+
+.excel-import-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 11px;
+}
+
+@media (max-width: 1050px) {
+  .export-actions {
+    grid-column: span 2;
+  }
+}
+
+@media (max-width: 720px) {
+  .export-actions {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .export-actions .export-button {
+    width: 100%;
+    min-width: 0;
+    min-height: 46px;
+  }
+
+  .excel-import-header {
+    grid-template-columns: 1fr;
+  }
+
+  .excel-file-button {
+    width: 100%;
+    min-height: 46px;
+  }
+
+  .excel-import-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .excel-import-actions button {
+    width: 100%;
+    min-height: 46px;
+  }
+}
+
+@media (max-width: 390px) {
+  .export-actions {
+    grid-column: auto;
+    grid-template-columns: 1fr;
+  }
+}

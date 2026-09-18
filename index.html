@@ -15,7 +15,7 @@
   <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
   <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
   <link rel="manifest" href="site.webmanifest">
-  <link rel="stylesheet" href="style.css?v=20260918-2">
+  <link rel="stylesheet" href="style.css?v=20260918-3">
 </head>
 <body>
   <header class="topbar">
@@ -97,7 +97,10 @@
         <label>Sexe<select id="sexFilter"><option value="all">Tous</option><option value="male">Mâles</option><option value="female">Femelles</option><option value="undetermined">Indéterminés</option></select></label>
         <label>Unité<select id="unitFilter"><option value="raw">Captures brutes</option><option value="per_day">Captures / jour</option></select></label>
         <label>Courbe<select id="processingFilter"><option value="observed">Valeurs observées</option><option value="weekly">Total hebdomadaire</option><option value="smoothed">Lissage</option></select></label>
-        <button id="exportExcelButton" class="secondary-button export-button" type="button">Exporter Excel</button>
+        <div class="export-actions">
+          <button id="exportExcelButton" class="secondary-button export-button" type="button">Exporter Excel</button>
+          <button id="exportSvgButton" class="secondary-button export-button" type="button">Exporter SVG</button>
+        </div>
       </div>
     </section>
 
@@ -198,6 +201,42 @@
       <input id="observationId" type="hidden">
       <label>Campagne<select id="observationCampaign" required></select></label>
       <label>Parcelle<select id="observationParcel" required></select></label>
+
+      <section class="excel-import-card full-span" aria-label="Import Excel de relevés">
+        <div class="excel-import-header">
+          <div>
+            <p class="panel-kicker">Import de relevés</p>
+            <h3>Importer un tableau Excel</h3>
+            <p>
+              Première ligne : les dates. Première colonne : le nom des parcelles.
+              Les cellules contiennent le total des captures. Les cellules vides sont ignorées et les zéros sont conservés.
+            </p>
+          </div>
+          <label class="excel-file-button">
+            Choisir un Excel
+            <input id="observationExcelFile" type="file" accept=".xlsx,.xls,.csv">
+          </label>
+        </div>
+
+        <div class="excel-format-example" aria-label="Exemple de structure Excel">
+          <code>Dates | 23/3 | 24/3 | 25/3 | …</code>
+          <code>G&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;| 0&nbsp;&nbsp;&nbsp;&nbsp;| …</code>
+          <code>J&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;| 0&nbsp;&nbsp;&nbsp;&nbsp;| …</code>
+        </div>
+
+        <p class="excel-import-help">
+          Les noms doivent correspondre aux noms des parcelles dans SAM, sans la variété.
+          Si une parcelle possède plusieurs pièges actifs, sélectionne d'abord cette parcelle et le piège à utiliser.
+        </p>
+
+        <div id="excelImportPreview" class="excel-import-preview hidden"></div>
+
+        <div class="excel-import-actions">
+          <button id="cancelExcelImportButton" class="secondary-button hidden" type="button">Annuler l'import</button>
+          <button id="confirmExcelImportButton" class="primary-button hidden" type="button" disabled>Importer les relevés</button>
+        </div>
+      </section>
+
       <label>Piège<select id="observationTrap" required></select></label>
       <label>Date<input id="observationDate" type="date" required></label>
       <label>Total capturé<input id="observationTotal" type="number" min="0" step="1" required></label>
@@ -273,10 +312,10 @@
 
   <footer><p>SAM Piégeage — SudExpé</p><p>Outil de suivi des réseaux de pièges</p></footer>
 
-  <script src="config.js?v=20260918-2"></script>
+  <script src="config.js?v=20260918-3"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <script src="app.js?v=20260918-2"></script>
+  <script src="app.js?v=20260918-3"></script>
 </body>
 </html>

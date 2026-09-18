@@ -37,6 +37,7 @@ let currentUser = null;
 let chart = null;
 let deferredInstallPrompt = null;
 let syncInProgress = false;
+let excelImportPlan = null;
 
 const data = {
   species: [], campaigns: [], campaignSpecies: [], parcels: [], campaignParcels: [],
@@ -1112,12 +1113,541 @@ async function saveTrap(event){event.preventDefault();const existing=data.traps.
 function openTrapEventDialog(trap=null){populateEventTrapSelect();if(trap)$("eventTrap").value=trap.id;$("eventDate").value=todayISO();$("eventType").value="replacement";$("eventLabel").value="";$("eventComment").value="";setMessage($("eventMessage"));$("trapEventDialog").showModal();}
 async function saveTrapEvent(event){event.preventDefault();const payload={id:uuid(),trap_id:$("eventTrap").value,event_date:$("eventDate").value,event_type:$("eventType").value,label:$("eventLabel").value.trim()||null,comment:$("eventComment").value.trim()||null,archived_at:null,created_by:currentUser.id,created_at:new Date().toISOString(),updated_at:new Date().toISOString()};try{await writeRecord(TABLES.trapEvents,payload);if(payload.event_type==="replacement"){const trap=trapById(payload.trap_id);if(trap)await writeRecord(TABLES.traps,{...trap,installed_on:payload.event_date,updated_at:new Date().toISOString()});}setMessage($("eventMessage"),navigator.onLine?"Événement enregistré.":"Événement enregistré hors connexion.");renderAll();}catch(error){setMessage($("eventMessage"),error.message||"Enregistrement impossible.",true);}}
 
+
+// -----------------------------------------------------------------------------
+// Import Excel des relevés
+// -----------------------------------------------------------------------------
+function normalizeParcelName(value) {
+  return String(value ?? "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLocaleLowerCase("fr-FR");
+}
+
+function parcelNameCandidates(value) {
+  const raw = String(value ?? "").trim().replace(/\s+/g, " ");
+  const normalized = normalizeParcelName(raw);
+  const withoutPrefix = normalizeParcelName(raw.replace(/^parcelle\s+/i, ""));
+  return [...new Set([normalized, withoutPrefix].filter(Boolean))];
+}
+
+function parseExcelDateValue(value, campaignYear) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    const year = value.getFullYear();
+    const month = String(value.getMonth() + 1).padStart(2, "0");
+    const day = String(value.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  if (typeof value === "number" && window.XLSX?.SSF?.parse_date_code) {
+    const parsed = XLSX.SSF.parse_date_code(value);
+    if (parsed?.y && parsed?.m && parsed?.d) {
+      const year = parsed.y < 1900 ? Number(campaignYear) : parsed.y;
+      return `${String(year).padStart(4, "0")}-${String(parsed.m).padStart(2, "0")}-${String(parsed.d).padStart(2, "0")}`;
+    }
+  }
+
+  const text = String(value ?? "").trim();
+  if (!text) return null;
+
+  let match = text.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
+  if (match) {
+    const [, y, m, d] = match;
+    return validIsoParts(Number(y), Number(m), Number(d));
+  }
+
+  match = text.match(/^(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?$/);
+  if (match) {
+    let [, d, m, y] = match;
+    let year = y ? Number(y) : Number(campaignYear);
+    if (year < 100) year += 2000;
+    return validIsoParts(year, Number(m), Number(d));
+  }
+
+  return null;
+}
+
+function validIsoParts(year, month, day) {
+  if (!year || month < 1 || month > 12 || day < 1 || day > 31) return null;
+  const date = new Date(year, month - 1, day);
+  if (
+    date.getFullYear() !== year ||
+    date.getMonth() !== month - 1 ||
+    date.getDate() !== day
+  ) return null;
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function resetExcelImport() {
+  excelImportPlan = null;
+
+  const input = $("observationExcelFile");
+  if (input) input.value = "";
+
+  const preview = $("excelImportPreview");
+  if (preview) {
+    preview.innerHTML = "";
+    preview.classList.add("hidden");
+  }
+
+  const confirmButton = $("confirmExcelImportButton");
+  const cancelButton = $("cancelExcelImportButton");
+
+  if (confirmButton) {
+    confirmButton.classList.add("hidden");
+    confirmButton.disabled = true;
+  }
+  if (cancelButton) cancelButton.classList.add("hidden");
+}
+
+function findParcelForExcelName(campaignId, cellValue) {
+  const candidates = parcelNameCandidates(cellValue);
+  const parcels = parcelsForCampaign(campaignId);
+
+  const exact = parcels.find(parcel =>
+    candidates.includes(normalizeParcelName(parcel.name))
+  );
+
+  return exact || null;
+}
+
+function resolveTrapForImportedParcel(campaignId, parcel) {
+  const traps = trapsForCampaign(campaignId, parcel.id);
+
+  // Si la parcelle affichée dans la fenêtre Relevé est celle de la ligne,
+  // le piège sélectionné manuellement est prioritaire.
+  const selectedParcelId = $("observationParcel").value;
+  const selectedTrapId = $("observationTrap").value;
+
+  if (
+    selectedParcelId === parcel.id &&
+    selectedTrapId &&
+    traps.some(trap => trap.id === selectedTrapId)
+  ) {
+    return { trap: trapById(selectedTrapId), error: null };
+  }
+
+  if (traps.length === 1) return { trap: traps[0], error: null };
+
+  if (!traps.length) {
+    return {
+      trap: null,
+      error: `La parcelle « ${parcel.name} » n’a aucun piège actif dans cette campagne.`
+    };
+  }
+
+  return {
+    trap: null,
+    error: `La parcelle « ${parcel.name} » possède ${traps.length} pièges actifs. Sélectionne cette parcelle et le piège à utiliser, puis relance l’analyse.`
+  };
+}
+
+function renderExcelImportPreview(plan) {
+  const box = $("excelImportPreview");
+  const confirmButton = $("confirmExcelImportButton");
+  const cancelButton = $("cancelExcelImportButton");
+
+  if (!box || !confirmButton || !cancelButton) return;
+
+  const parcelCount = new Set(plan.records.map(record => record.parcel_id)).size;
+
+  box.innerHTML = `
+    <div class="excel-import-summary">
+      <span class="excel-import-badge good">${parcelCount} parcelle${parcelCount > 1 ? "s" : ""} reconnue${parcelCount > 1 ? "s" : ""}</span>
+      <span class="excel-import-badge good">${plan.records.length} relevé${plan.records.length > 1 ? "s" : ""} à importer</span>
+      ${plan.duplicates.length ? `<span class="excel-import-badge warning">${plan.duplicates.length} doublon${plan.duplicates.length > 1 ? "s" : ""} ignoré${plan.duplicates.length > 1 ? "s" : ""}</span>` : ""}
+      ${plan.errors.length ? `<span class="excel-import-badge error">${plan.errors.length} erreur${plan.errors.length > 1 ? "s" : ""}</span>` : ""}
+    </div>
+    ${plan.warnings.length ? `<ul class="excel-import-warnings">${plan.warnings.slice(0, 12).map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : ""}
+    ${plan.errors.length ? `<ul class="excel-import-errors">${plan.errors.slice(0, 15).map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : ""}
+  `;
+
+  box.classList.remove("hidden");
+  cancelButton.classList.remove("hidden");
+  confirmButton.classList.remove("hidden");
+  confirmButton.disabled = Boolean(plan.errors.length) || !plan.records.length;
+}
+
+async function analyzeObservationExcel(file) {
+  resetExcelImport();
+
+  if (!file) return;
+  if (!window.XLSX) {
+    setMessage($("observationMessage"), "Bibliothèque Excel indisponible.", true);
+    return;
+  }
+
+  const campaign = campaignById($("observationCampaign").value);
+  if (!campaign) {
+    setMessage($("observationMessage"), "Sélectionne d’abord une campagne.", true);
+    return;
+  }
+
+  try {
+    const buffer = await file.arrayBuffer();
+    const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
+    const firstSheetName = workbook.SheetNames[0];
+
+    if (!firstSheetName) throw new Error("Le fichier Excel ne contient aucune feuille.");
+
+    const sheet = workbook.Sheets[firstSheetName];
+    const rows = XLSX.utils.sheet_to_json(sheet, {
+      header: 1,
+      raw: true,
+      defval: null
+    });
+
+    if (!rows.length || rows[0].length < 2) {
+      throw new Error("Format non reconnu : la première ligne doit contenir « Dates » puis les dates des relevés.");
+    }
+
+    const header = rows[0];
+    const dateColumns = [];
+    const errors = [];
+    const warnings = [];
+    const duplicates = [];
+    const records = [];
+    const fileKeys = new Set();
+
+    for (let column = 1; column < header.length; column++) {
+      const cell = header[column];
+      if (cell === null || cell === "") continue;
+
+      const iso = parseExcelDateValue(cell, campaign.year);
+      if (!iso) {
+        errors.push(`Date non reconnue en colonne ${column + 1} : « ${String(cell)} ».`);
+        continue;
+      }
+
+      dateColumns.push({ column, date: iso });
+    }
+
+    if (!dateColumns.length) {
+      errors.push("Aucune date exploitable n’a été trouvée sur la première ligne.");
+    }
+
+    const existingKeys = new Set(
+      activeRows(data.observations)
+        .filter(observation => observation.campaign_id === campaign.id)
+        .map(observation => `${observation.trap_id}|${observation.observed_on}`)
+    );
+
+    for (let rowIndex = 1; rowIndex < rows.length; rowIndex++) {
+      const row = rows[rowIndex];
+      const parcelCell = row?.[0];
+
+      if (parcelCell === null || String(parcelCell ?? "").trim() === "") continue;
+
+      const parcel = findParcelForExcelName(campaign.id, parcelCell);
+
+      if (!parcel) {
+        errors.push(
+          `Ligne ${rowIndex + 1} : parcelle « ${String(parcelCell).trim()} » introuvable dans la campagne.`
+        );
+        continue;
+      }
+
+      const resolved = resolveTrapForImportedParcel(campaign.id, parcel);
+      if (resolved.error) {
+        errors.push(`Ligne ${rowIndex + 1} : ${resolved.error}`);
+        continue;
+      }
+
+      const trap = resolved.trap;
+
+      for (const { column, date } of dateColumns) {
+        const rawValue = row?.[column];
+
+        if (rawValue === null || rawValue === undefined || String(rawValue).trim() === "") {
+          continue;
+        }
+
+        const numeric = Number(
+          typeof rawValue === "string"
+            ? rawValue.replace(",", ".").trim()
+            : rawValue
+        );
+
+        if (!Number.isFinite(numeric) || numeric < 0 || !Number.isInteger(numeric)) {
+          errors.push(
+            `Ligne ${rowIndex + 1}, ${fmtDate(date)} : « ${String(rawValue)} » n’est pas un nombre entier de captures valide.`
+          );
+          continue;
+        }
+
+        const key = `${trap.id}|${date}`;
+
+        if (existingKeys.has(key) || fileKeys.has(key)) {
+          duplicates.push(`${parcel.name} — ${fmtDate(date)}`);
+          continue;
+        }
+
+        fileKeys.add(key);
+
+        records.push({
+          id: uuid(),
+          campaign_id: campaign.id,
+          parcel_id: parcel.id,
+          trap_id: trap.id,
+          observed_on: date,
+          total_captured: numeric,
+          identification_status: campaign.protocol_type === "aphid" ? "not_started" : "not_applicable",
+          comment: `Import Excel — ${file.name}`,
+          legacy_source_id: null,
+          archived_at: null,
+          created_by: currentUser.id,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        });
+      }
+    }
+
+    if (duplicates.length) {
+      warnings.push(
+        `${duplicates.length} relevé${duplicates.length > 1 ? "s" : ""} existe${duplicates.length > 1 ? "nt" : ""} déjà pour le même piège et la même date : ${duplicates.length > 1 ? "ils sont" : "il est"} ignoré${duplicates.length > 1 ? "s" : ""}.`
+      );
+    }
+
+    excelImportPlan = {
+      fileName: file.name,
+      campaignId: campaign.id,
+      records,
+      errors,
+      warnings,
+      duplicates
+    };
+
+    renderExcelImportPreview(excelImportPlan);
+    setMessage($("observationMessage"));
+  } catch (error) {
+    resetExcelImport();
+    setMessage(
+      $("observationMessage"),
+      error?.message || "Impossible de lire le fichier Excel.",
+      true
+    );
+  }
+}
+
+async function confirmObservationExcelImport() {
+  const plan = excelImportPlan;
+
+  if (!plan || plan.errors.length || !plan.records.length) return;
+
+  const button = $("confirmExcelImportButton");
+  const oldText = button.textContent;
+  button.disabled = true;
+  button.textContent = "Import en cours…";
+
+  let imported = 0;
+
+  try {
+    for (const record of plan.records) {
+      const payload = { ...record };
+      delete payload.parcel_id; // champ d’aide uniquement pour l’aperçu
+      await writeRecord(TABLES.observations, payload);
+      imported++;
+    }
+
+    const campaign = campaignById(plan.campaignId);
+
+    $("campaignFilter").value = plan.campaignId;
+    populateParcelFilter();
+    populateAdminSelects();
+    renderAll();
+
+    setMessage(
+      $("observationMessage"),
+      navigator.onLine
+        ? `${imported} relevé${imported > 1 ? "s" : ""} importé${imported > 1 ? "s" : ""} depuis Excel.`
+        : `${imported} relevé${imported > 1 ? "s" : ""} importé${imported > 1 ? "s" : ""} hors connexion. Synchronisation automatique au retour du réseau.`
+    );
+
+    resetExcelImport();
+
+    if (campaign) {
+      $("observationCampaign").value = campaign.id;
+    }
+  } catch (error) {
+    setMessage(
+      $("observationMessage"),
+      `Import interrompu après ${imported} relevé${imported > 1 ? "s" : ""} : ${error?.message || "erreur inconnue"}`,
+      true
+    );
+  } finally {
+    button.textContent = oldText;
+    button.disabled = false;
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Export SVG du graphique actuellement affiché
+// -----------------------------------------------------------------------------
+function escapeXml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+function exportChartSvg() {
+  if (!chart || !chart.data?.labels?.length || !chart.data?.datasets?.length) {
+    setMessage($("globalMessage"), "Aucun graphique à exporter.", true);
+    return;
+  }
+
+  const labels = chart.data.labels.map(String);
+  const datasets = chart.data.datasets || [];
+  const eventLines = chart.options?.plugins?.samEvents?.events || [];
+  const title = $("chartTitle")?.textContent || "SAM Piégeage";
+  const summary = $("campaignSummary")?.textContent || "";
+
+  const width = 1400;
+  const height = 780;
+  const margin = { left: 92, right: 42, top: 118, bottom: 150 };
+  const plotWidth = width - margin.left - margin.right;
+  const plotHeight = height - margin.top - margin.bottom;
+
+  const palette = [
+    "#d31145", "#31688e", "#2e8b57", "#a56a00",
+    "#744f9c", "#008c95", "#b04a3a", "#58636d",
+    "#7a5195", "#ef5675", "#ffa600"
+  ];
+
+  const values = datasets.flatMap(dataset =>
+    (dataset.data || [])
+      .filter(value => value !== null && value !== undefined && Number.isFinite(Number(value)))
+      .map(Number)
+  );
+
+  const rawMax = values.length ? Math.max(...values) : 0;
+  const yMax = rawMax <= 0 ? 1 : Math.max(1, Math.ceil(rawMax * 1.1));
+  const yTicks = 5;
+
+  const xForIndex = index =>
+    labels.length <= 1
+      ? margin.left + plotWidth / 2
+      : margin.left + (index / (labels.length - 1)) * plotWidth;
+
+  const yForValue = value =>
+    margin.top + plotHeight - (Number(value) / yMax) * plotHeight;
+
+  let svg = `<?xml version="1.0" encoding="UTF-8"?>\n`;
+  svg += `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`;
+  svg += `<rect width="100%" height="100%" fill="#ffffff"/>`;
+  svg += `<style>
+    text{font-family:Arial,Helvetica,sans-serif;fill:#202832}
+    .muted{fill:#66717c}
+    .grid{stroke:#e6ebee;stroke-width:1}
+    .axis{stroke:#87919a;stroke-width:1.2}
+  </style>`;
+
+  svg += `<text x="${margin.left}" y="42" font-size="26" font-weight="700">${escapeXml(title)}</text>`;
+  if (summary) {
+    svg += `<text x="${margin.left}" y="69" font-size="14" class="muted">${escapeXml(summary)}</text>`;
+  }
+
+  // Grille et axe Y.
+  for (let tick = 0; tick <= yTicks; tick++) {
+    const value = (yMax / yTicks) * tick;
+    const y = yForValue(value);
+    svg += `<line class="grid" x1="${margin.left}" y1="${y}" x2="${margin.left + plotWidth}" y2="${y}"/>`;
+    svg += `<text x="${margin.left - 12}" y="${y + 5}" text-anchor="end" font-size="12" class="muted">${escapeXml(fmtNumber(value, value < 10 ? 1 : 0))}</text>`;
+  }
+
+  svg += `<line class="axis" x1="${margin.left}" y1="${margin.top}" x2="${margin.left}" y2="${margin.top + plotHeight}"/>`;
+  svg += `<line class="axis" x1="${margin.left}" y1="${margin.top + plotHeight}" x2="${margin.left + plotWidth}" y2="${margin.top + plotHeight}"/>`;
+
+  const unitLabel = $("unitFilter")?.value === "per_day" ? "captures / jour" : "captures";
+  svg += `<text x="26" y="${margin.top + plotHeight / 2}" font-size="13" class="muted" transform="rotate(-90 26 ${margin.top + plotHeight / 2})" text-anchor="middle">${escapeXml(unitLabel)}</text>`;
+
+  // Interventions / événements à leur date visible.
+  eventLines.forEach(event => {
+    const index = labels.indexOf(String(event.date));
+    if (index < 0) return;
+    const x = xForIndex(index);
+    svg += `<line x1="${x}" y1="${margin.top}" x2="${x}" y2="${margin.top + plotHeight}" stroke="#8c5a11" stroke-width="1.5" stroke-dasharray="6 5" opacity=".8"/>`;
+  });
+
+  // Séries.
+  datasets.forEach((dataset, datasetIndex) => {
+    const color = palette[datasetIndex % palette.length];
+    const points = [];
+
+    (dataset.data || []).forEach((value, index) => {
+      if (value === null || value === undefined || !Number.isFinite(Number(value))) return;
+      points.push({
+        x: xForIndex(index),
+        y: yForValue(value),
+        value: Number(value)
+      });
+    });
+
+    if (points.length) {
+      svg += `<polyline fill="none" stroke="${color}" stroke-width="3" stroke-linejoin="round" stroke-linecap="round" points="${points.map(point => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(" ")}"/>`;
+      points.forEach(point => {
+        svg += `<circle cx="${point.x.toFixed(2)}" cy="${point.y.toFixed(2)}" r="3.5" fill="${color}"/>`;
+      });
+    }
+  });
+
+  // Libellés X : au maximum ~14 pour rester lisibles.
+  const xStep = Math.max(1, Math.ceil(labels.length / 14));
+  labels.forEach((label, index) => {
+    if (index % xStep !== 0 && index !== labels.length - 1) return;
+    const x = xForIndex(index);
+    const y = margin.top + plotHeight + 22;
+    svg += `<text x="${x}" y="${y}" font-size="11" class="muted" text-anchor="end" transform="rotate(-45 ${x} ${y})">${escapeXml(label)}</text>`;
+  });
+
+  // Légende des courbes.
+  let legendX = margin.left;
+  let legendY = height - 72;
+  datasets.forEach((dataset, index) => {
+    const color = palette[index % palette.length];
+    const label = String(dataset.label || `Série ${index + 1}`);
+    const estimated = Math.min(300, 34 + label.length * 7);
+
+    if (legendX + estimated > width - margin.right) {
+      legendX = margin.left;
+      legendY += 25;
+    }
+
+    svg += `<line x1="${legendX}" y1="${legendY - 4}" x2="${legendX + 20}" y2="${legendY - 4}" stroke="${color}" stroke-width="3"/>`;
+    svg += `<circle cx="${legendX + 10}" cy="${legendY - 4}" r="3" fill="${color}"/>`;
+    svg += `<text x="${legendX + 27}" y="${legendY}" font-size="12">${escapeXml(label)}</text>`;
+    legendX += estimated;
+  });
+
+  // Légende des interventions.
+  if (eventLines.length) {
+    svg += `<line x1="${margin.left}" y1="${height - 28}" x2="${margin.left + 20}" y2="${height - 28}" stroke="#8c5a11" stroke-width="1.5" stroke-dasharray="6 5"/>`;
+    svg += `<text x="${margin.left + 28}" y="${height - 24}" font-size="12" class="muted">Intervention / événement de piège</text>`;
+  }
+
+  svg += `</svg>`;
+
+  const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  const campaign = campaignById($("campaignFilter")?.value);
+
+  anchor.href = url;
+  anchor.download = `SAM_Piegeage_${slugify(campaign?.name || "graphique")}_${slugify(title)}.svg`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
 // -----------------------------------------------------------------------------
 // Relevés / identification
 // -----------------------------------------------------------------------------
 function renderObservationSpeciesRows(existingDetails=[]){const campaign=campaignById($("observationCampaign")?.value);const section=$("aphidDetailSection");const box=$("aphidSpeciesRows");if(!campaign||campaign.protocol_type!=="aphid"){section.classList.add("hidden");box.innerHTML="";return;}section.classList.remove("hidden");box.innerHTML="";campaignSpecies(campaign.id).forEach(s=>{const d=existingDetails.find(x=>x.species_id===s.id);const row=document.createElement("div");row.className="species-detail-row";row.dataset.speciesId=s.id;row.innerHTML=`<div class="species-name"><strong>${escapeHtml(s.scientific_name)}</strong><span>${escapeHtml(s.common_name||"")}</span></div><label>Mâles<input class="male-input" type="number" min="0" step="1" value="${d?.males||0}"></label><label>Femelles<input class="female-input" type="number" min="0" step="1" value="${d?.females||0}"></label><label>Indéterminés<input class="undetermined-input" type="number" min="0" step="1" value="${d?.undetermined||0}"></label>`;box.appendChild(row);});updateIdentificationSummary();}
 function updateIdentificationSummary(){const rows=[...$("aphidSpeciesRows").querySelectorAll(".species-detail-row")];const identified=rows.reduce((sum,row)=>sum+Number(row.querySelector(".male-input").value||0)+Number(row.querySelector(".female-input").value||0)+Number(row.querySelector(".undetermined-input").value||0),0);const total=Number($("observationTotal").value||0);$("identificationSummary").textContent=`${identified} identifié${identified>1?"s":""} · ${Math.max(0,total-identified)} restant${Math.max(0,total-identified)>1?"s":""}`;$("identificationSummary").classList.toggle("over",identified>total);}
-function openObservationDialog(obs=null){$("observationForm").reset();$("observationId").value=obs?.id||"";$("observationDialogTitle").textContent=obs?"Modifier / compléter le relevé":"Ajouter un relevé";populateAdminSelects();const campaignId=obs?.campaign_id||$("campaignFilter").value||activeCampaigns()[0]?.id;$("observationCampaign").value=campaignId||"";const trap=obs?trapById(obs.trap_id):null;populateObservationParcelSelect(trap?.parcel_id||($("parcelFilter").value!=="all"?$("parcelFilter").value:null),obs?.trap_id||($("trapFilter").value!=="all"?$("trapFilter").value:null));$("observationDate").value=obs?.observed_on||todayISO();$("observationTotal").value=obs?.total_captured??"";$("observationComment").value=obs?.comment||"";renderObservationSpeciesRows(obs?detailsForObservation(obs.id):[]);setMessage($("observationMessage"));$("observationDialog").showModal();}
+function openObservationDialog(obs=null){$("observationForm").reset();resetExcelImport();$("observationId").value=obs?.id||"";$("observationDialogTitle").textContent=obs?"Modifier / compléter le relevé":"Ajouter un relevé";populateAdminSelects();const campaignId=obs?.campaign_id||$("campaignFilter").value||activeCampaigns()[0]?.id;$("observationCampaign").value=campaignId||"";const trap=obs?trapById(obs.trap_id):null;populateObservationParcelSelect(trap?.parcel_id||($("parcelFilter").value!=="all"?$("parcelFilter").value:null),obs?.trap_id||($("trapFilter").value!=="all"?$("trapFilter").value:null));$("observationDate").value=obs?.observed_on||todayISO();$("observationTotal").value=obs?.total_captured??"";$("observationComment").value=obs?.comment||"";renderObservationSpeciesRows(obs?detailsForObservation(obs.id):[]);setMessage($("observationMessage"));$("observationDialog").showModal();}
 async function saveObservation(event){event.preventDefault();const existing=data.observations.find(o=>o.id===$("observationId").value);const campaign=campaignById($("observationCampaign").value);const total=Number($("observationTotal").value);if(!campaign||!$("observationTrap").value||!Number.isInteger(total)||total<0)return setMessage($("observationMessage"),"Renseigne correctement la campagne, le piège, la date et le total.",true);const detailRows=[...$("aphidSpeciesRows").querySelectorAll(".species-detail-row")].map(row=>({species_id:row.dataset.speciesId,males:Number(row.querySelector(".male-input").value||0),females:Number(row.querySelector(".female-input").value||0),undetermined:Number(row.querySelector(".undetermined-input").value||0)}));const identified=detailRows.reduce((s,d)=>s+d.males+d.females+d.undetermined,0);if(campaign.protocol_type==="aphid"&&identified>total)return setMessage($("observationMessage"),`Impossible : ${identified} individus sont identifiés alors que le total capturé est ${total}.`,true);const status=campaign.protocol_type!=="aphid"?"not_applicable":identified===0?"not_started":identified<total?"partial":"complete";const payload={id:existing?.id||uuid(),campaign_id:campaign.id,trap_id:$("observationTrap").value,observed_on:$("observationDate").value,total_captured:total,identification_status:status,comment:$("observationComment").value.trim()||null,legacy_source_id:existing?.legacy_source_id||null,archived_at:existing?.archived_at||null,created_by:existing?.created_by||currentUser.id,created_at:existing?.created_at||new Date().toISOString(),updated_at:new Date().toISOString()};try{await writeRecord(TABLES.observations,payload);if(campaign.protocol_type==="aphid"){for(const d of detailRows){const old=data.details.find(x=>x.observation_id===payload.id&&x.species_id===d.species_id);await writeRecord(TABLES.details,{id:old?.id||uuid(),observation_id:payload.id,species_id:d.species_id,males:d.males,females:d.females,undetermined:d.undetermined,created_at:old?.created_at||new Date().toISOString(),updated_at:new Date().toISOString()});}}setMessage($("observationMessage"),navigator.onLine?"Relevé enregistré.":"Relevé enregistré hors connexion. Il sera synchronisé automatiquement.");$("campaignFilter").value=campaign.id;populateParcelFilter();renderAll();}catch(error){setMessage($("observationMessage"),error.message||"Enregistrement impossible.",true);}}
 
 // -----------------------------------------------------------------------------
@@ -1185,10 +1715,10 @@ function initPWA(){const card=$("installCard");if(isStandalone())localStorage.se
 // -----------------------------------------------------------------------------
 function bind() {
   $("loginForm").addEventListener("submit",login);$("logoutButton").addEventListener("click",logout);$("authToggleButton").addEventListener("click",toggleMobileAuthCard);$("installButton").addEventListener("click",installApp);
-  $("campaignFilter").addEventListener("change",()=>{populateParcelFilter();populateAdminSelects();renderDashboard();});$("parcelFilter").addEventListener("change",()=>{populateTrapFilter();renderDashboard();});$("trapFilter").addEventListener("change",renderDashboard);$("speciesFilter").addEventListener("change",populateSpeciesFilter);$("sexFilter").addEventListener("change",renderDashboard);$("unitFilter").addEventListener("change",renderDashboard);$("processingFilter").addEventListener("change",renderDashboard);$("exportExcelButton").addEventListener("click",exportExcel);
+  $("campaignFilter").addEventListener("change",()=>{populateParcelFilter();populateAdminSelects();renderDashboard();});$("parcelFilter").addEventListener("change",()=>{populateTrapFilter();renderDashboard();});$("trapFilter").addEventListener("change",renderDashboard);$("speciesFilter").addEventListener("change",populateSpeciesFilter);$("sexFilter").addEventListener("change",renderDashboard);$("unitFilter").addEventListener("change",renderDashboard);$("processingFilter").addEventListener("change",renderDashboard);$("exportExcelButton").addEventListener("click",exportExcel);$("exportSvgButton").addEventListener("click",exportChartSvg);$("observationExcelFile").addEventListener("change",event=>analyzeObservationExcel(event.target.files?.[0]));$("cancelExcelImportButton").addEventListener("click",resetExcelImport);$("confirmExcelImportButton").addEventListener("click",confirmObservationExcelImport);
   $("newCampaignButton").addEventListener("click",()=>openCampaignDialog());$("newParcelButton").addEventListener("click",()=>openParcelDialog());$("newTrapButton").addEventListener("click",()=>openTrapDialog());$("newObservationButton").addEventListener("click",()=>openObservationDialog());$("newInterventionButton").addEventListener("click",openInterventionDialog);$("speciesButton").addEventListener("click",openSpeciesDialog);$("archivesButton").addEventListener("click",openArchivesDialog);
   $("campaignForm").addEventListener("submit",saveCampaign);$("parcelForm").addEventListener("submit",saveParcel);$("trapForm").addEventListener("submit",saveTrap);$("trapEventForm").addEventListener("submit",saveTrapEvent);$("observationForm").addEventListener("submit",saveObservation);$("interventionForm").addEventListener("submit",saveIntervention);$("speciesForm").addEventListener("submit",saveSpecies);
-  $("campaignProtocol").addEventListener("change",toggleCampaignSpeciesSection);$("trapCampaign").addEventListener("change",populateTrapParcelSelect);$("observationCampaign").addEventListener("change",()=>populateObservationParcelSelect());$("observationParcel").addEventListener("change",()=>populateObservationTrapSelect());$("observationTotal").addEventListener("input",updateIdentificationSummary);$("aphidSpeciesRows").addEventListener("input",updateIdentificationSummary);$("interventionCampaign").addEventListener("change",()=>renderInterventionParcelChoices($("interventionCampaign").value,[]));
+  $("campaignProtocol").addEventListener("change",toggleCampaignSpeciesSection);$("trapCampaign").addEventListener("change",populateTrapParcelSelect);$("observationCampaign").addEventListener("change",()=>{populateObservationParcelSelect();resetExcelImport();});$("observationParcel").addEventListener("change",()=>{populateObservationTrapSelect();resetExcelImport();});$("observationTrap").addEventListener("change",resetExcelImport);$("observationTotal").addEventListener("input",updateIdentificationSummary);$("aphidSpeciesRows").addEventListener("input",updateIdentificationSummary);$("interventionCampaign").addEventListener("change",()=>renderInterventionParcelChoices($("interventionCampaign").value,[]));
   document.querySelectorAll("[data-close]").forEach(btn=>btn.addEventListener("click",()=>$(btn.dataset.close).close()));document.querySelectorAll("dialog").forEach(dialog=>dialog.addEventListener("click",event=>{if(event.target===dialog)dialog.close();}));
   addEventListener("offline",updateSyncStatus);addEventListener("online",async()=>{updateSyncStatus("Connexion retrouvée — synchronisation…","syncing");await syncQueue();});
 }
