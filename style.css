@@ -20,3 +20,109 @@ footer{display:flex;justify-content:space-between;gap:20px;padding:24px clamp(18
 @media(max-width:1050px){.filter-grid{grid-template-columns:repeat(4,minmax(130px,1fr))}.export-button{grid-column:span 2}.hero{display:grid}.admin-actions{width:100%;grid-template-columns:repeat(2,1fr)}}
 @media(max-width:720px){html{-webkit-text-size-adjust:100%}body{padding-bottom:env(safe-area-inset-bottom)}.mobile-only{display:block}.mobile-only.hidden{display:none!important}.topbar{position:sticky;top:0;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:start;min-height:68px;padding:calc(8px + env(safe-area-inset-top)) 10px 10px}.brand{min-width:0;gap:8px}.sud-shell{width:86px;height:42px;padding:5px 6px;border-radius:9px}.sam-shell{width:42px;height:42px;padding:3px;border-radius:9px}.brand-kicker{display:none}.brand h1{overflow:hidden;font-size:1rem;text-overflow:ellipsis;white-space:nowrap}.auth-toggle-button{display:inline-flex;align-items:center;justify-content:center;width:48px;height:48px;padding:0;margin-left:auto;border:0;border-radius:50%;background:transparent;box-shadow:0 5px 14px rgba(92,7,32,.24);overflow:hidden}.auth-toggle-icon{display:block;width:48px;height:48px;object-fit:cover;border-radius:50%}.auth-card{display:none;grid-column:1/-1;width:100%;margin-left:0;padding:10px;border-radius:14px;background:rgba(255,255,255,.15)}.auth-card.open{display:block}.auth-form{grid-template-columns:1fr}.auth-card input,.auth-button{min-height:44px;font-size:16px}main{width:min(100% - 16px,1240px);padding-top:12px}.panel{padding:14px;margin-bottom:12px;border-radius:14px}.hero h2{font-size:1.55rem}.hero-text{font-size:.9rem}.admin-actions{grid-template-columns:repeat(2,1fr);gap:7px}.admin-actions button{min-height:46px;padding:0 8px}.filter-grid{grid-template-columns:1fr 1fr;gap:9px}.filter-grid select{min-height:46px;font-size:16px}.export-button{grid-column:1/-1;min-height:46px}.metric-grid{grid-template-columns:1fr 1fr;gap:9px;margin:12px 0}.metric-card{padding:13px}.metric-card strong{font-size:1.15rem}.chart-wrap{min-height:310px}.panel-header{align-items:center}.campaign-summary{display:none}.history-card{grid-template-columns:1fr}.history-actions{display:grid;grid-template-columns:1fr 1fr}.app-dialog{width:100%;max-width:none;max-height:92dvh;margin:auto 0 0;border-radius:18px 18px 0 0}.dialog-header{padding:14px}.dialog-form,.dialog-form.two-cols{grid-template-columns:1fr;padding:14px}.full-span{grid-column:auto}.form-message{padding:0 14px 10px}.management-section{padding:12px 14px 18px}.management-item{grid-template-columns:1fr}.management-actions{justify-content:stretch}.management-actions button{flex:1}.checkbox-grid{grid-template-columns:1fr}.identification-header{display:grid}.identification-summary{white-space:normal}.species-detail-row{grid-template-columns:1fr 1fr 1fr}.species-name{grid-column:1/-1}.species-detail-row input{font-size:16px}.install-panel-header{align-items:flex-start}.install-panel-logo-wrap{width:58px;height:58px}footer{display:grid}.close-button{min-width:44px;min-height:44px}}
 @media(max-width:390px){.admin-actions,.filter-grid,.metric-grid{grid-template-columns:1fr}.export-button{grid-column:auto}.history-actions{grid-template-columns:1fr}.species-detail-row{grid-template-columns:1fr}.species-name{grid-column:auto}}
+
+
+/* =========================================================
+   Confirmation intégrée à SAM
+   Remplace les confirm() du navigateur
+   ========================================================= */
+.confirm-dialog {
+  width: min(520px, calc(100% - 28px));
+  overflow: hidden;
+}
+
+.confirm-dialog-content {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+  padding: 22px 22px 16px;
+}
+
+.confirm-dialog-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  color: #9d1639;
+  background: #fff0f4;
+  border: 1px solid #efbcc9;
+  font-size: 1.45rem;
+  font-weight: 900;
+}
+
+.confirm-dialog h2 {
+  margin: 4px 0 7px;
+  font-size: 1.2rem;
+}
+
+.confirm-dialog-message {
+  margin: 0;
+  color: var(--muted);
+  white-space: pre-line;
+}
+
+.confirm-dialog-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  padding: 14px 22px 22px;
+  border-top: 1px solid var(--line);
+}
+
+.danger-confirm-button {
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid #b31440;
+  border-radius: 9px;
+  color: #fff;
+  background: #b31440;
+  font-weight: 800;
+}
+
+.danger-confirm-button:hover {
+  background: #941033;
+  border-color: #941033;
+}
+
+.confirm-dialog.archive-mode .confirm-dialog-icon {
+  color: #8c5a11;
+  background: #fff6e8;
+  border-color: #f0d3aa;
+}
+
+.confirm-dialog.archive-mode .danger-confirm-button {
+  color: #fff;
+  background: var(--brand);
+  border-color: var(--brand);
+}
+
+@media (max-width: 720px) {
+  .confirm-dialog {
+    width: calc(100% - 20px);
+    max-width: none;
+    margin: auto 10px;
+    border-radius: 16px;
+  }
+
+  .confirm-dialog-content {
+    grid-template-columns: 44px minmax(0, 1fr);
+    gap: 11px;
+    padding: 18px 16px 14px;
+  }
+
+  .confirm-dialog-icon {
+    width: 44px;
+    height: 44px;
+  }
+
+  .confirm-dialog-actions {
+    padding: 12px 16px 16px;
+  }
+
+  .confirm-dialog-actions button {
+    min-height: 48px;
+  }
+}

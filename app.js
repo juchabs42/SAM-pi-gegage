@@ -708,7 +708,19 @@ function renderChart() {
     if (currentUser) {
       const btn = document.createElement("button"); btn.type = "button"; btn.className = "event-archive-button"; btn.textContent = " ×"; btn.title = "Archiver";
       btn.style.cssText = "border:0;background:transparent;color:inherit;font-weight:900;padding:0 0 0 4px";
-      btn.addEventListener("click", async () => { if (confirm("Archiver cet événement ?")) { await archiveRecord(event.table, event.record, true); renderAll(); } });
+      btn.addEventListener("click", async () => {
+        const confirmed = await showSamConfirmation({
+          title: "Archiver cet événement ?",
+          message: "L’événement sera déplacé dans les Archives et pourra être restauré plus tard.",
+          confirmText: "Archiver",
+          mode: "archive"
+        });
+
+        if (!confirmed) return;
+
+        await archiveRecord(event.table, event.record, true);
+        renderAll();
+      });
       chip.appendChild(btn);
     }
     legend.appendChild(chip);
@@ -739,7 +751,19 @@ function renderHistory() {
     if (currentUser) {
       const actions = document.createElement("div"); actions.className = "history-actions";
       const edit = button("Modifier", "small-button", () => openObservationDialog(obs));
-      const archive = button("Archiver", "small-button danger", async () => { if (confirm("Archiver ce relevé ?")) { await archiveRecord(TABLES.observations, obs, true); renderAll(); } });
+      const archive = button("Archiver", "small-button danger", async () => {
+        const confirmed = await showSamConfirmation({
+          title: "Archiver ce relevé ?",
+          message: "Le relevé sera déplacé dans les Archives et pourra être restauré plus tard.",
+          confirmText: "Archiver",
+          mode: "archive"
+        });
+
+        if (!confirmed) return;
+
+        await archiveRecord(TABLES.observations, obs, true);
+        renderAll();
+      });
       actions.append(edit, archive); card.appendChild(actions);
     }
     container.appendChild(card);
@@ -748,6 +772,65 @@ function renderHistory() {
 
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>'"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]));
+}
+
+
+function showSamConfirmation({
+  title = "Confirmer l’action",
+  message = "",
+  confirmText = "Confirmer",
+  mode = "danger"
+} = {}) {
+  const dialog = $("confirmDialog");
+  const titleEl = $("confirmDialogTitle");
+  const messageEl = $("confirmDialogMessage");
+  const confirmButton = $("confirmDialogConfirm");
+  const cancelButton = $("confirmDialogCancel");
+
+  if (!dialog || !titleEl || !messageEl || !confirmButton || !cancelButton) {
+    return Promise.resolve(false);
+  }
+
+  titleEl.textContent = title;
+  messageEl.textContent = message;
+  confirmButton.textContent = confirmText;
+
+  dialog.classList.toggle("archive-mode", mode === "archive");
+
+  return new Promise(resolve => {
+    let settled = false;
+
+    const finish = result => {
+      if (settled) return;
+      settled = true;
+
+      cancelButton.removeEventListener("click", onCancel);
+      confirmButton.removeEventListener("click", onConfirm);
+      dialog.removeEventListener("cancel", onNativeCancel);
+      dialog.removeEventListener("close", onClose);
+
+      if (dialog.open) dialog.close();
+      resolve(result);
+    };
+
+    const onCancel = () => finish(false);
+    const onConfirm = () => finish(true);
+    const onNativeCancel = event => {
+      event.preventDefault();
+      finish(false);
+    };
+    const onClose = () => {
+      if (!settled) finish(false);
+    };
+
+    cancelButton.addEventListener("click", onCancel);
+    confirmButton.addEventListener("click", onConfirm);
+    dialog.addEventListener("cancel", onNativeCancel);
+    dialog.addEventListener("close", onClose);
+
+    dialog.showModal();
+    cancelButton.focus();
+  });
 }
 
 function button(text, className, handler) {
@@ -840,9 +923,13 @@ async function permanentlyDeleteArchived(entityType, record, label) {
     return;
   }
 
-  const confirmed = confirm(
-    `Supprimer définitivement ${label} ?\n\nCette action est irréversible et peut aussi supprimer les données qui en dépendent.`
-  );
+  const confirmed = await showSamConfirmation({
+    title: "Suppression définitive",
+    message: `Supprimer définitivement ${label} ?\n\nCette action est irréversible et peut aussi supprimer les données qui en dépendent.`,
+    confirmText: "Supprimer définitivement",
+    mode: "danger"
+  });
+
   if (!confirmed) return;
 
   const { error } = await db.rpc("sam_piegeage_delete_archived", {

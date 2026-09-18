@@ -15,7 +15,7 @@
   <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
   <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
   <link rel="manifest" href="site.webmanifest">
-  <link rel="stylesheet" href="style.css?v=20260918-1">
+  <link rel="stylesheet" href="style.css?v=20260918-2">
 </head>
 <body>
   <header class="topbar">
@@ -254,12 +254,29 @@
     <div class="management-section"><h3>Événements de piège archivés</h3><div id="archivedTrapEventList" class="management-list"></div></div>
   </dialog>
 
+
+  <!-- CONFIRMATION INTÉGRÉE À SAM -->
+  <dialog id="confirmDialog" class="app-dialog confirm-dialog" aria-labelledby="confirmDialogTitle">
+    <div class="confirm-dialog-content">
+      <div id="confirmDialogIcon" class="confirm-dialog-icon" aria-hidden="true">!</div>
+      <div>
+        <p class="panel-kicker">Confirmation</p>
+        <h2 id="confirmDialogTitle">Confirmer l’action</h2>
+        <p id="confirmDialogMessage" class="confirm-dialog-message"></p>
+      </div>
+    </div>
+    <div class="confirm-dialog-actions">
+      <button id="confirmDialogCancel" class="secondary-button" type="button">Annuler</button>
+      <button id="confirmDialogConfirm" class="danger-confirm-button" type="button">Confirmer</button>
+    </div>
+  </dialog>
+
   <footer><p>SAM Piégeage — SudExpé</p><p>Outil de suivi des réseaux de pièges</p></footer>
 
-  <script src="config.js?v=20260918-1"></script>
+  <script src="config.js?v=20260918-2"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <script src="app.js?v=20260918-1"></script>
+  <script src="app.js?v=20260918-2"></script>
 </body>
 </html>
