@@ -353,6 +353,33 @@ async function loadData(silent = false) {
 function activeRows(list) { return list.filter(row => !row.archived_at); }
 function campaignById(id) { return data.campaigns.find(row => row.id === id); }
 function parcelById(id) { return data.parcels.find(row => row.id === id); }
+function parcelLabel(parcel, { compact = false } = {}) {
+  if (!parcel) return "—";
+
+  const parts = [
+    parcel.name,
+    parcel.exploitation || "",
+    parcel.variety || "",
+    Number.isFinite(Number(parcel.area_ha)) ? `${fmtNumber(parcel.area_ha, 2)} ha` : ""
+  ].filter(Boolean);
+
+  return compact
+    ? [parcel.name, parcel.exploitation || ""].filter(Boolean).join(" — ")
+    : parts.join(" — ");
+}
+
+function sameParcelIdentity(a, b) {
+  return (
+    String(a.exploitation || "").trim().toLocaleLowerCase("fr-FR") ===
+      String(b.exploitation || "").trim().toLocaleLowerCase("fr-FR") &&
+    String(a.name || "").trim().toLocaleLowerCase("fr-FR") ===
+      String(b.name || "").trim().toLocaleLowerCase("fr-FR") &&
+    String(a.variety || "").trim().toLocaleLowerCase("fr-FR") ===
+      String(b.variety || "").trim().toLocaleLowerCase("fr-FR") &&
+    Number(a.area_ha) === Number(b.area_ha)
+  );
+}
+
 function trapById(id) { return data.traps.find(row => row.id === id); }
 function speciesById(id) { return data.species.find(row => row.id === id); }
 
@@ -397,7 +424,7 @@ function populateParcelFilter() {
   const campaignId = $("campaignFilter").value;
   const previous = $("parcelFilter").value;
   const parcels = parcelsForCampaign(campaignId);
-  fillSelect($("parcelFilter"), [{ value: "all", label: "Toutes les parcelles" }, ...parcels.map(p => ({ value: p.id, label: `${p.name} — ${p.variety || ""}` }))], previous || "all");
+  fillSelect($("parcelFilter"), [{ value: "all", label: "Toutes les parcelles" }, ...parcels.map(p => ({ value: p.id, label: parcelLabel(p) }))], previous || "all");
   populateTrapFilter();
 }
 
@@ -406,7 +433,7 @@ function populateTrapFilter() {
   const parcelId = $("parcelFilter").value || "all";
   const previous = $("trapFilter").value;
   const traps = trapsForCampaign(campaignId, parcelId);
-  fillSelect($("trapFilter"), [{ value: "all", label: "Tous les pièges" }, ...traps.map(t => ({ value: t.id, label: `${t.code}${parcelById(t.parcel_id) ? ` — ${parcelById(t.parcel_id).name}` : ""}` }))], previous || "all");
+  fillSelect($("trapFilter"), [{ value: "all", label: "Tous les pièges" }, ...traps.map(t => ({ value: t.id, label: `${t.code}${parcelById(t.parcel_id) ? ` — ${parcelLabel(parcelById(t.parcel_id), { compact: true })}` : ""}` }))], previous || "all");
   populateSpeciesFilter();
 }
 
@@ -442,13 +469,13 @@ function populateAdminSelects() {
 function populateTrapParcelSelect() {
   const campaignId = $("trapCampaign")?.value;
   const allParcels = activeRows(data.parcels).sort((a, b) => a.exploitation.localeCompare(b.exploitation, "fr") || a.name.localeCompare(b.name, "fr"));
-  fillSelect($("trapParcel"), allParcels.map(p => ({ value: p.id, label: `${p.exploitation} — ${p.name} — ${p.variety || ""}` })), $("trapParcel")?.value);
+  fillSelect($("trapParcel"), allParcels.map(p => ({ value: p.id, label: parcelLabel(p) })), $("trapParcel")?.value);
 }
 
 function populateObservationParcelSelect(preferredParcel = null, preferredTrap = null) {
   const campaignId = $("observationCampaign")?.value;
   const parcels = parcelsForCampaign(campaignId);
-  fillSelect($("observationParcel"), parcels.map(p => ({ value: p.id, label: `${p.name} — ${p.variety || ""}` })), preferredParcel || $("observationParcel")?.value);
+  fillSelect($("observationParcel"), parcels.map(p => ({ value: p.id, label: parcelLabel(p) })), preferredParcel || $("observationParcel")?.value);
   populateObservationTrapSelect(preferredTrap);
   renderObservationSpeciesRows();
 }
@@ -590,7 +617,7 @@ function seriesData() {
       else points = weekly.map((point, index) => ({ date: point.date, value: index === 0 ? point.value : (point.value + weekly[index - 1].value) / 2 }));
     }
 
-    series.push({ trap, parcel, label: `${parcel?.name || "Parcelle"} — ${trap?.code || "Piège"}`, points });
+    series.push({ trap, parcel, label: `${parcelLabel(parcel, { compact: true })} — ${trap?.code || "Piège"}`, points });
   });
 
   return { campaign, observations, series, anchor };
@@ -738,7 +765,7 @@ function renderHistory() {
     const identified = identifiedTotal(obs.id); const remaining = Math.max(0, Number(obs.total_captured || 0) - identified);
     const card = document.createElement("article"); card.className = `history-card${obs._pending ? " pending" : ""}`;
     const main = document.createElement("div"); main.className = "history-main";
-    main.innerHTML = `<strong>${fmtDate(obs.observed_on)} — ${parcel?.name || "—"} — ${trap?.code || "—"}</strong><div class="history-meta"><b>${obs.total_captured}</b> capturé${obs.total_captured > 1 ? "s" : ""}${campaignById(obs.campaign_id)?.protocol_type === "aphid" ? ` · ${identified} identifié${identified > 1 ? "s" : ""} · ${remaining} restant${remaining > 1 ? "s" : ""}` : ""}${obs.comment ? ` · ${escapeHtml(obs.comment)}` : ""}</div>`;
+    main.innerHTML = `<strong>${fmtDate(obs.observed_on)} — ${parcelLabel(parcel, { compact: true })} — ${trap?.code || "—"}</strong><div class="history-meta"><b>${obs.total_captured}</b> capturé${obs.total_captured > 1 ? "s" : ""}${campaignById(obs.campaign_id)?.protocol_type === "aphid" ? ` · ${identified} identifié${identified > 1 ? "s" : ""} · ${remaining} restant${remaining > 1 ? "s" : ""}` : ""}${obs.comment ? ` · ${escapeHtml(obs.comment)}` : ""}</div>`;
     if (details.length) {
       const detailWrap = document.createElement("div"); detailWrap.className = "history-details";
       details.filter(d => Number(d.males||0)+Number(d.females||0)+Number(d.undetermined||0)>0).forEach(d => {
@@ -1103,7 +1130,50 @@ async function saveCampaign(event){event.preventDefault();const existing=campaig
 // Parcelles
 // -----------------------------------------------------------------------------
 function openParcelDialog(parcel=null){$("parcelForm").reset();$("parcelId").value=parcel?.id||"";$("parcelFarm").value=parcel?.exploitation||"";$("parcelName").value=parcel?.name||"";$("parcelVariety").value=parcel?.variety||"";$("parcelArea").value=parcel?.area_ha??"";setMessage($("parcelMessage"));renderParcelList();$("parcelDialog").showModal();}
-async function saveParcel(event){event.preventDefault();const existing=parcelById($("parcelId").value);const payload={id:existing?.id||uuid(),exploitation:$("parcelFarm").value.trim(),name:$("parcelName").value.trim(),variety:$("parcelVariety").value.trim(),area_ha:Number($("parcelArea").value),created_by:existing?.created_by||currentUser.id,created_at:existing?.created_at||new Date().toISOString(),archived_at:existing?.archived_at||null,updated_at:new Date().toISOString()};try{await writeRecord(TABLES.parcels,payload);setMessage($("parcelMessage"),navigator.onLine?"Parcelle enregistrée.":"Parcelle enregistrée hors connexion.");renderAll();renderParcelList();}catch(error){setMessage($("parcelMessage"),error.message||"Enregistrement impossible.",true);}}
+async function saveParcel(event) {
+  event.preventDefault();
+
+  const existing = parcelById($("parcelId").value);
+
+  const payload = {
+    id: existing?.id || uuid(),
+    exploitation: $("parcelFarm").value.trim(),
+    name: $("parcelName").value.trim(),
+    variety: $("parcelVariety").value.trim(),
+    area_ha: Number($("parcelArea").value),
+    created_by: existing?.created_by || currentUser.id,
+    created_at: existing?.created_at || new Date().toISOString(),
+    archived_at: existing?.archived_at || null,
+    updated_at: new Date().toISOString()
+  };
+
+  const exactDuplicate = data.parcels.some(parcel =>
+    parcel.id !== payload.id &&
+    !parcel.archived_at &&
+    sameParcelIdentity(parcel, payload)
+  );
+
+  if (exactDuplicate) {
+    setMessage(
+      $("parcelMessage"),
+      "Une parcelle avec exactement le même nom, la même exploitation, la même variété et la même surface existe déjà.",
+      true
+    );
+    return;
+  }
+
+  try {
+    await writeRecord(TABLES.parcels, payload);
+    setMessage(
+      $("parcelMessage"),
+      navigator.onLine ? "Parcelle enregistrée." : "Parcelle enregistrée hors connexion."
+    );
+    renderAll();
+    renderParcelList();
+  } catch (error) {
+    setMessage($("parcelMessage"), error.message || "Enregistrement impossible.", true);
+  }
+}
 
 // -----------------------------------------------------------------------------
 // Pièges et événements
@@ -1201,14 +1271,59 @@ function resetExcelImport() {
 }
 
 function findParcelForExcelName(campaignId, cellValue) {
-  const candidates = parcelNameCandidates(cellValue);
+  const raw = String(cellValue ?? "").trim();
+  const parts = raw.split("|").map(part => part.trim());
+  const nameCandidates = parcelNameCandidates(parts[0]);
   const parcels = parcelsForCampaign(campaignId);
 
-  const exact = parcels.find(parcel =>
-    candidates.includes(normalizeParcelName(parcel.name))
+  let matches = parcels.filter(parcel =>
+    nameCandidates.includes(normalizeParcelName(parcel.name))
   );
 
-  return exact || null;
+  // Syntaxe facultative en cas d'homonymes :
+  // Nom | Exploitation | Variété | Surface
+  if (parts.length > 1 && parts[1]) {
+    matches = matches.filter(parcel =>
+      normalizeParcelName(parcel.exploitation) === normalizeParcelName(parts[1])
+    );
+  }
+
+  if (parts.length > 2 && parts[2]) {
+    matches = matches.filter(parcel =>
+      normalizeParcelName(parcel.variety) === normalizeParcelName(parts[2])
+    );
+  }
+
+  if (parts.length > 3 && parts[3]) {
+    const expectedArea = Number(String(parts[3]).replace(",", ".").replace(/\s*ha\s*$/i, ""));
+    if (Number.isFinite(expectedArea)) {
+      matches = matches.filter(parcel => Number(parcel.area_ha) === expectedArea);
+    }
+  }
+
+  if (matches.length === 1) {
+    return { parcel: matches[0], error: null };
+  }
+
+  if (!matches.length) {
+    return {
+      parcel: null,
+      error: `parcelle « ${raw} » introuvable dans la campagne.`
+    };
+  }
+
+  const examples = matches
+    .slice(0, 3)
+    .map(parcel => `${parcel.name} | ${parcel.exploitation} | ${parcel.variety || ""} | ${fmtNumber(parcel.area_ha, 2)}`)
+    .join(" ; ");
+
+  return {
+    parcel: null,
+    error:
+      `plusieurs parcelles portent le nom « ${parts[0]} ». ` +
+      `Dans la première colonne de l’Excel, précise-la sous la forme ` +
+      `« Nom | Exploitation | Variété | Surface ». Exemple : ${examples}.`
+  };
 }
 
 function resolveTrapForImportedParcel(campaignId, parcel) {
@@ -1338,15 +1453,14 @@ async function analyzeObservationExcel(file) {
 
       if (parcelCell === null || String(parcelCell ?? "").trim() === "") continue;
 
-      const parcel = findParcelForExcelName(campaign.id, parcelCell);
+      const parcelMatch = findParcelForExcelName(campaign.id, parcelCell);
 
-      if (!parcel) {
-        errors.push(
-          `Ligne ${rowIndex + 1} : parcelle « ${String(parcelCell).trim()} » introuvable dans la campagne.`
-        );
+      if (parcelMatch.error || !parcelMatch.parcel) {
+        errors.push(`Ligne ${rowIndex + 1} : ${parcelMatch.error}`);
         continue;
       }
 
+      const parcel = parcelMatch.parcel;
       const resolved = resolveTrapForImportedParcel(campaign.id, parcel);
       if (resolved.error) {
         errors.push(`Ligne ${rowIndex + 1} : ${resolved.error}`);
@@ -1653,7 +1767,7 @@ async function saveObservation(event){event.preventDefault();const existing=data
 // -----------------------------------------------------------------------------
 // Interventions
 // -----------------------------------------------------------------------------
-function renderInterventionParcelChoices(campaignId,selected=[]){const box=$("interventionParcelChoices");box.innerHTML="";parcelsForCampaign(campaignId).forEach(p=>{const label=document.createElement("label");label.className="checkbox-card";label.innerHTML=`<input type="checkbox" value="${p.id}" ${selected.includes(p.id)?"checked":""}> <span>${escapeHtml(p.name)} — ${escapeHtml(p.variety||"")}</span>`;box.appendChild(label);});}
+function renderInterventionParcelChoices(campaignId,selected=[]){const box=$("interventionParcelChoices");box.innerHTML="";parcelsForCampaign(campaignId).forEach(p=>{const label=document.createElement("label");label.className="checkbox-card";label.innerHTML=`<input type="checkbox" value="${p.id}" ${selected.includes(p.id)?"checked":""}> <span>${escapeHtml(parcelLabel(p))}</span>`;box.appendChild(label);});}
 function openInterventionDialog(){const campaignId=$("campaignFilter").value||activeCampaigns()[0]?.id;populateAdminSelects();$("interventionCampaign").value=campaignId||"";$("interventionDate").value=todayISO();$("interventionTime").value="";$("interventionType").value="Traitement";$("interventionProduct").value="";$("interventionDose").value="";$("interventionTarget").value="";$("interventionComment").value="";renderInterventionParcelChoices(campaignId,[]);setMessage($("interventionMessage"));$("interventionDialog").showModal();}
 async function saveIntervention(event){event.preventDefault();const id=uuid();const payload={id,campaign_id:$("interventionCampaign").value,intervention_date:$("interventionDate").value,intervention_time:$("interventionTime").value||null,intervention_type:$("interventionType").value.trim(),product:$("interventionProduct").value.trim()||null,dose:$("interventionDose").value.trim()||null,target:$("interventionTarget").value.trim()||null,comment:$("interventionComment").value.trim()||null,archived_at:null,created_by:currentUser.id,created_at:new Date().toISOString(),updated_at:new Date().toISOString()};try{await writeRecord(TABLES.interventions,payload);const parcels=[...$("interventionParcelChoices").querySelectorAll('input:checked')].map(i=>i.value);for(const parcelId of parcels)await writeRecord(TABLES.interventionParcels,{id:uuid(),intervention_id:id,parcel_id:parcelId,created_at:new Date().toISOString()});setMessage($("interventionMessage"),navigator.onLine?"Intervention enregistrée.":"Intervention enregistrée hors connexion.");renderAll();}catch(error){setMessage($("interventionMessage"),error.message||"Enregistrement impossible.",true);}}
 
@@ -1678,7 +1792,7 @@ function exportExcel() {
   traps.forEach(trap=>{
     const parcel=parcelById(trap.parcel_id);const trapObs=observations.filter(o=>o.trap_id===trap.id);
     const valueByDate=(date,fn)=>{const obs=trapObs.find(o=>o.observed_on===date);return obs?fn(obs):"";};
-    rows.push([`${parcel?.name||""} (${parcel?.variety||""}) — ${trap.code}`,"Total",...dates.map(d=>valueByDate(d,o=>o.total_captured))]);
+    rows.push([`${parcelLabel(parcel)} — ${trap.code}`,"Total",...dates.map(d=>valueByDate(d,o=>o.total_captured))]);
     if(campaign.protocol_type==="aphid")campaignSpecies(campaign.id).forEach(s=>{
       const detailVal=(obs,key)=>{const det=data.details.find(x=>x.observation_id===obs.id&&x.species_id===s.id);return det?Number(det[key]||0):"";};
       rows.push(["",`${s.scientific_name} — M`,...dates.map(d=>valueByDate(d,o=>detailVal(o,"males")))]);
@@ -1690,7 +1804,7 @@ function exportExcel() {
 
   const anchor=campaignAnchor(campaign,observations);const weeks=[...new Set(observations.map(o=>bucketStart(o.observed_on,anchor)))].sort();
   rows.push([]);rows.push(["TOTAUX HEBDOMADAIRES ET LISSAGE"]);rows.push(["Parcelle / piège","Mesure",...weeks.map(w=>fmtDate(w))]);
-  traps.forEach(trap=>{const parcel=parcelById(trap.parcel_id);const trapObs=observations.filter(o=>o.trap_id===trap.id);const totals=weeks.map(w=>trapObs.filter(o=>bucketStart(o.observed_on,anchor)===w).reduce((sum,o)=>sum+Number(o.total_captured||0),0));const smooth=totals.map((v,i)=>i===0?v:(v+totals[i-1])/2);rows.push([`${parcel?.name||""} — ${trap.code}`,"Total hebdomadaire",...totals]);rows.push(["","Total lissé",...smooth]);if(campaign.protocol_type==="aphid")campaignSpecies(campaign.id).forEach(s=>{const weekly=weeks.map(w=>trapObs.filter(o=>bucketStart(o.observed_on,anchor)===w).reduce((sum,o)=>{const d=data.details.find(x=>x.observation_id===o.id&&x.species_id===s.id);return sum+(d?Number(d.males||0)+Number(d.females||0)+Number(d.undetermined||0):0);},0));const sm=weekly.map((v,i)=>i===0?v:(v+weekly[i-1])/2);rows.push(["",s.scientific_name,...weekly]);rows.push(["",`${s.scientific_name} lissé`,...sm]);});rows.push([]);});
+  traps.forEach(trap=>{const parcel=parcelById(trap.parcel_id);const trapObs=observations.filter(o=>o.trap_id===trap.id);const totals=weeks.map(w=>trapObs.filter(o=>bucketStart(o.observed_on,anchor)===w).reduce((sum,o)=>sum+Number(o.total_captured||0),0));const smooth=totals.map((v,i)=>i===0?v:(v+totals[i-1])/2);rows.push([`${parcelLabel(parcel)} — ${trap.code}`,"Total hebdomadaire",...totals]);rows.push(["","Total lissé",...smooth]);if(campaign.protocol_type==="aphid")campaignSpecies(campaign.id).forEach(s=>{const weekly=weeks.map(w=>trapObs.filter(o=>bucketStart(o.observed_on,anchor)===w).reduce((sum,o)=>{const d=data.details.find(x=>x.observation_id===o.id&&x.species_id===s.id);return sum+(d?Number(d.males||0)+Number(d.females||0)+Number(d.undetermined||0):0);},0));const sm=weekly.map((v,i)=>i===0?v:(v+weekly[i-1])/2);rows.push(["",s.scientific_name,...weekly]);rows.push(["",`${s.scientific_name} lissé`,...sm]);});rows.push([]);});
 
   const wb=XLSX.utils.book_new();const ws=XLSX.utils.aoa_to_sheet(rows);ws["!cols"]=[{wch:34},{wch:30},...dates.map(()=>({wch:12}))];XLSX.utils.book_append_sheet(wb,ws,(campaign.name||"Campagne").slice(0,31));
   const trapRows=[["Campagne","Parcelle","Variété","Piège","Type","Rang","Position","Installation","Attractif","Commentaire"],...traps.map(t=>{const p=parcelById(t.parcel_id);return[campaign.name,p?.name||"",p?.variety||"",t.code,t.trap_type||"",t.row_ref||"",t.position||"",t.installed_on||"",t.attractant||"",t.comment||""];})];XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(trapRows),"Pièges");
