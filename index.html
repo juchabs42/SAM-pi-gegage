@@ -15,7 +15,7 @@
   <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
   <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
   <link rel="manifest" href="site.webmanifest">
-  <link rel="stylesheet" href="style.css?v=20260916-v2">
+  <link rel="stylesheet" href="style.css?v=20260918-1">
 </head>
 <body>
   <header class="topbar">
@@ -63,10 +63,10 @@
       </div>
       <div id="adminActions" class="admin-actions hidden">
         <button class="primary-button" id="newObservationButton" type="button">+ Relevé</button>
-        <button class="secondary-button" id="newInterventionButton" type="button">+ Intervention</button>
-        <button class="secondary-button" id="newTrapButton" type="button">+ Piège</button>
-        <button class="secondary-button" id="newParcelButton" type="button">+ Parcelle</button>
         <button class="secondary-button" id="newCampaignButton" type="button">+ Campagne</button>
+        <button class="secondary-button" id="newParcelButton" type="button">+ Parcelle</button>
+        <button class="secondary-button" id="newTrapButton" type="button">+ Piège</button>
+        <button class="secondary-button" id="newInterventionButton" type="button">+ Intervention</button>
         <button class="secondary-button" id="speciesButton" type="button">Espèces</button>
         <button class="secondary-button" id="archivesButton" type="button">Archives</button>
       </div>
@@ -96,7 +96,7 @@
         <label>Donnée<select id="speciesFilter"></select></label>
         <label>Sexe<select id="sexFilter"><option value="all">Tous</option><option value="male">Mâles</option><option value="female">Femelles</option><option value="undetermined">Indéterminés</option></select></label>
         <label>Unité<select id="unitFilter"><option value="raw">Captures brutes</option><option value="per_day">Captures / jour</option></select></label>
-        <label>Courbe<select id="processingFilter"><option value="observed">Valeurs observées</option><option value="weekly">Total hebdomadaire</option><option value="smoothed">Lissage Bertrand</option></select></label>
+        <label>Courbe<select id="processingFilter"><option value="observed">Valeurs observées</option><option value="weekly">Total hebdomadaire</option><option value="smoothed">Lissage</option></select></label>
         <button id="exportExcelButton" class="secondary-button export-button" type="button">Exporter Excel</button>
       </div>
     </section>
@@ -132,7 +132,7 @@
       <label>Nom de la campagne<input id="campaignName" type="text" placeholder="Ex. Pucerons Marsillargues 2026" required></label>
       <label>Année<input id="campaignYear" type="number" min="2000" max="2100" required></label>
       <label>Ravageur / groupe suivi<input id="campaignPest" type="text" placeholder="Ex. Pucerons" required></label>
-      <label>Protocole<select id="campaignProtocol"><option value="simple">Simple — nombre de captures</option><option value="aphid">Pucerons — espèces + M/F/indéterminés</option></select></label>
+      <label>Protocole<select id="campaignProtocol"><option value="simple">Simple — nombre de captures</option><option value="aphid">Avancé — espèces + M/F/indéterminés</option></select></label>
       <label>Date de début<input id="campaignStart" type="date"></label>
       <label>Date de fin<input id="campaignEnd" type="date"></label>
       <div id="campaignSpeciesSection" class="full-span species-choice-section hidden"><span class="field-label">Espèces suivies</span><div id="campaignSpeciesChoices" class="checkbox-grid"></div></div>
@@ -203,7 +203,7 @@
       <label>Total capturé<input id="observationTotal" type="number" min="0" step="1" required></label>
       <label class="full-span">Commentaire<textarea id="observationComment" rows="2"></textarea></label>
       <div id="aphidDetailSection" class="full-span hidden">
-        <div class="identification-header"><div><span class="field-label">Identification des pucerons</span><p>Saisis systématiquement mâles, femelles et indéterminés. Tu peux enregistrer le total puis compléter l'identification plus tard.</p></div><div id="identificationSummary" class="identification-summary">0 identifié · 0 restant</div></div>
+        <div class="identification-header"><div><span class="field-label">Identification détaillée</span><p>Saisis systématiquement mâles, femelles et indéterminés. Tu peux enregistrer le total puis compléter l'identification plus tard.</p></div><div id="identificationSummary" class="identification-summary">0 identifié · 0 restant</div></div>
         <div id="aphidSpeciesRows" class="species-detail-list"></div>
       </div>
       <button class="primary-button full-span" type="submit">Enregistrer le relevé</button>
@@ -245,6 +245,10 @@
   <!-- ARCHIVES -->
   <dialog id="archivesDialog" class="app-dialog wide-dialog">
     <div class="dialog-header"><div><p class="panel-kicker">Traçabilité</p><h2>Archives</h2></div><button class="close-button" data-close="archivesDialog" type="button">×</button></div>
+    <div class="management-section"><h3>Campagnes archivées</h3><div id="archivedCampaignList" class="management-list"></div></div>
+    <div class="management-section"><h3>Parcelles archivées</h3><div id="archivedParcelList" class="management-list"></div></div>
+    <div class="management-section"><h3>Pièges archivés</h3><div id="archivedTrapList" class="management-list"></div></div>
+    <div class="management-section"><h3>Espèces archivées</h3><div id="archivedSpeciesList" class="management-list"></div></div>
     <div class="management-section"><h3>Relevés archivés</h3><div id="archivedObservationList" class="management-list"></div></div>
     <div class="management-section"><h3>Interventions archivées</h3><div id="archivedInterventionList" class="management-list"></div></div>
     <div class="management-section"><h3>Événements de piège archivés</h3><div id="archivedTrapEventList" class="management-list"></div></div>
@@ -252,10 +256,10 @@
 
   <footer><p>SAM Piégeage — SudExpé</p><p>Outil de suivi des réseaux de pièges</p></footer>
 
-  <script src="config.js?v=20260916-v2"></script>
+  <script src="config.js?v=20260918-1"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <script src="app.js?v=20260916-v2"></script>
+  <script src="app.js?v=20260918-1"></script>
 </body>
 </html>

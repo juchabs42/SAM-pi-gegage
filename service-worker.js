@@ -1,10 +1,10 @@
-const CACHE_NAME = "sam-piegeage-v2-20260916";
+const CACHE_NAME = "sam-piegeage-v2-20260918-1";
 const CORE_ASSETS = [
   "./",
   "./index.html",
-  "./style.css?v=20260916-v2",
-  "./app.js?v=20260916-v2",
-  "./config.js?v=20260916-v2",
+  "./style.css?v=20260918-1",
+  "./app.js?v=20260918-1",
+  "./config.js?v=20260918-1",
   "./site.webmanifest",
   "./favicon.ico",
   "./favicon-16x16.png",

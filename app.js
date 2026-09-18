@@ -361,7 +361,7 @@ function activeCampaigns() {
 
 function campaignSpecies(campaignId) {
   const ids = data.campaignSpecies.filter(link => link.campaign_id === campaignId && link.active !== false).map(link => link.species_id);
-  return data.species.filter(s => ids.includes(s.id) && s.active !== false).sort((a, b) => a.scientific_name.localeCompare(b.scientific_name, "fr"));
+  return data.species.filter(s => ids.includes(s.id) && s.active !== false && !s.archived_at).sort((a, b) => a.scientific_name.localeCompare(b.scientific_name, "fr"));
 }
 
 function parcelsForCampaign(campaignId) {
@@ -412,14 +412,20 @@ function populateTrapFilter() {
 function populateSpeciesFilter() {
   const campaign = campaignById($("campaignFilter").value);
   const previous = $("speciesFilter").value;
-  const opts = [{ value: "total", label: campaign?.protocol_type === "aphid" ? "Tous les pucerons (total capturé)" : "Total des captures" }];
+  const opts = [{ value: "total", label: "Total des captures" }];
+
   if (campaign?.protocol_type === "aphid") {
     campaignSpecies(campaign.id).forEach(s => opts.push({ value: s.id, label: s.scientific_name }));
   }
+
   fillSelect($("speciesFilter"), opts, previous || "total");
-  const detailsEnabled = campaign?.protocol_type === "aphid" && $("speciesFilter").value !== "total";
-  $("sexFilter").disabled = !detailsEnabled;
-  if (!detailsEnabled) $("sexFilter").value = "all";
+
+  // Le protocole avancé permet de filtrer M / F / indéterminés,
+  // y compris lorsque "Total des captures" est sélectionné.
+  const advanced = campaign?.protocol_type === "aphid";
+  $("sexFilter").disabled = !advanced;
+  if (!advanced) $("sexFilter").value = "all";
+
   renderDashboard();
 }
 
@@ -492,7 +498,18 @@ function identifiedTotal(obsId) {
 function observationValue(obs) {
   const speciesId = $("speciesFilter").value;
   const sex = $("sexFilter").value;
-  if (speciesId === "total") return Number(obs.total_captured || 0);
+
+  if (speciesId === "total") {
+    if (sex === "all") return Number(obs.total_captured || 0);
+
+    const details = detailsForObservation(obs.id);
+    if (sex === "male") return details.reduce((sum, detail) => sum + Number(detail.males || 0), 0);
+    if (sex === "female") return details.reduce((sum, detail) => sum + Number(detail.females || 0), 0);
+    if (sex === "undetermined") return details.reduce((sum, detail) => sum + Number(detail.undetermined || 0), 0);
+
+    return Number(obs.total_captured || 0);
+  }
+
   const detail = data.details.find(d => d.observation_id === obs.id && d.species_id === speciesId);
   if (!detail) return 0;
   if (sex === "male") return Number(detail.males || 0);
@@ -637,11 +654,12 @@ function renderMetrics() {
 function renderChart() {
   const { campaign, series, anchor } = seriesData();
   const speciesId = $("speciesFilter").value;
-  const speciesLabel = speciesId === "total" ? (campaign?.protocol_type === "aphid" ? "Tous les pucerons" : "Captures") : (speciesById(speciesId)?.scientific_name || "Espèce");
+  const speciesLabel = speciesId === "total" ? "Total des captures" : (speciesById(speciesId)?.scientific_name || "Espèce");
+  const sexLabel = { all: "", male: " — Mâles", female: " — Femelles", undetermined: " — Indéterminés" }[$("sexFilter").value] || "";
   const unitLabel = $("unitFilter").value === "per_day" ? "captures / jour" : "captures";
-  const processLabel = { observed: "valeurs observées", weekly: "total hebdomadaire", smoothed: "lissage Bertrand (moyenne semaine courante + précédente)" }[$("processingFilter").value];
-  $("chartTitle").textContent = `${speciesLabel} — ${unitLabel} — ${processLabel}`;
-  $("campaignSummary").textContent = campaign ? `${campaign.pest_label} · ${campaign.year} · protocole ${campaign.protocol_type === "aphid" ? "pucerons détaillé" : "simple"}` : "";
+  const processLabel = { observed: "valeurs observées", weekly: "total hebdomadaire", smoothed: "lissage moyenne semaine courante + précédente" }[$("processingFilter").value];
+  $("chartTitle").textContent = `${speciesLabel}${sexLabel} — ${unitLabel} — ${processLabel}`;
+  $("campaignSummary").textContent = campaign ? `${campaign.pest_label} · ${campaign.year} · protocole ${campaign.protocol_type === "aphid" ? "avancé" : "simple"}` : "";
 
   const labelsSet = new Set();
   series.forEach(s => s.points.forEach(p => labelsSet.add(p.date)));
@@ -656,7 +674,7 @@ function renderChart() {
   const relevantTrapIds = new Set(series.map(s => s.trap.id));
   const trapEvents = activeRows(data.trapEvents).filter(e => relevantTrapIds.has(e.trap_id));
   const events = [
-    ...interventions.map(i => ({ date: eventDateForProcessing(i.intervention_date, anchor), label: `${i.intervention_type}${i.product ? ` — ${i.product}` : ""}` })),
+    ...interventions.map(i => ({ date: i.intervention_date, label: `${i.intervention_type}${i.product ? ` — ${i.product}` : ""}` })),
     ...trapEvents.map(e => ({ date: eventDateForProcessing(e.event_date, anchor), label: `${e.event_type} — ${e.label || trapById(e.trap_id)?.code || "piège"}` }))
   ];
   events.forEach(e => labelsSet.add(e.date));
@@ -740,7 +758,16 @@ function button(text, className, handler) {
 // Gestion / archivage
 // -----------------------------------------------------------------------------
 async function archiveRecord(table, record, archived) {
-  const payload = { ...record, archived_at: archived ? new Date().toISOString() : null, updated_at: new Date().toISOString() };
+  const payload = {
+    ...record,
+    archived_at: archived ? new Date().toISOString() : null,
+    updated_at: new Date().toISOString()
+  };
+
+  if (table === TABLES.species) {
+    payload.active = !archived;
+  }
+
   delete payload._pending;
   await writeRecord(table, payload);
 }
@@ -752,7 +779,7 @@ function renderManagementLists() {
 function renderCampaignList() {
   const box = $("campaignManageList"); if (!box) return; box.innerHTML = "";
   data.campaigns.slice().sort((a,b)=>b.year-a.year || a.name.localeCompare(b.name,"fr")).forEach(c => {
-    const item = managementItem(`${c.year} — ${c.name}`, `${c.pest_label} · ${c.protocol_type === "aphid" ? "protocole pucerons" : "protocole simple"}`, c.archived_at);
+    const item = managementItem(`${c.year} — ${c.name}`, `${c.pest_label} · ${c.protocol_type === "aphid" ? "protocole avancé" : "protocole simple"}`, c.archived_at);
     item.actions.append(button("Modifier", "small-button", () => openCampaignDialog(c)), button(c.archived_at ? "Restaurer" : "Archiver", `small-button ${c.archived_at ? "restore" : "danger"}`, async()=>{await archiveRecord(TABLES.campaigns,c,!c.archived_at);renderAll();}));
     box.appendChild(item.root);
   });
@@ -776,23 +803,193 @@ function renderTrapList() {
 }
 
 function renderSpeciesList() {
-  const box=$("speciesManageList"); if(!box)return; box.innerHTML="";
-  data.species.slice().sort((a,b)=>a.scientific_name.localeCompare(b.scientific_name,"fr")).forEach(s=>{const item=managementItem(s.scientific_name,s.common_name||"",s.active===false);item.actions.append(button(s.active===false?"Réactiver":"Désactiver",`small-button ${s.active===false?"restore":"danger"}`,async()=>{await writeRecord(TABLES.species,{...s,active:s.active===false,updated_at:new Date().toISOString()});renderAll();}));box.appendChild(item.root);});
+  const box = $("speciesManageList");
+  if (!box) return;
+  box.innerHTML = "";
+
+  data.species
+    .slice()
+    .sort((a, b) => a.scientific_name.localeCompare(b.scientific_name, "fr"))
+    .forEach(species => {
+      const archived = Boolean(species.archived_at);
+      const item = managementItem(species.scientific_name, species.common_name || "", archived);
+
+      item.actions.append(
+        button(
+          archived ? "Restaurer" : "Archiver",
+          `small-button ${archived ? "restore" : "danger"}`,
+          async () => {
+            await archiveRecord(TABLES.species, species, !archived);
+            renderAll();
+          }
+        )
+      );
+
+      box.appendChild(item.root);
+    });
 }
 
-function openArchivesDialog(){renderArchiveLists();$("archivesDialog").showModal();}
-function renderArchiveLists(){
-  const obsBox=$("archivedObservationList"), intBox=$("archivedInterventionList"), eventBox=$("archivedTrapEventList");
-  obsBox.innerHTML="";intBox.innerHTML="";eventBox.innerHTML="";
-  const archivedObs=data.observations.filter(o=>o.archived_at).sort((a,b)=>b.observed_on.localeCompare(a.observed_on));
-  if(!archivedObs.length)obsBox.innerHTML='<div class="history-empty">Aucun relevé archivé.</div>';
-  archivedObs.forEach(o=>{const t=trapById(o.trap_id),p=parcelById(t?.parcel_id);const item=managementItem(`${fmtDate(o.observed_on)} — ${p?.name||"—"} — ${t?.code||"—"}`,`${o.total_captured} captures`,true);item.actions.append(button("Restaurer","small-button restore",async()=>{await archiveRecord(TABLES.observations,o,false);renderAll();renderArchiveLists();}));obsBox.appendChild(item.root);});
-  const archivedInts=data.interventions.filter(i=>i.archived_at).sort((a,b)=>b.intervention_date.localeCompare(a.intervention_date));
-  if(!archivedInts.length)intBox.innerHTML='<div class="history-empty">Aucune intervention archivée.</div>';
-  archivedInts.forEach(i=>{const item=managementItem(`${fmtDate(i.intervention_date)} — ${i.intervention_type}`,i.product||"",true);item.actions.append(button("Restaurer","small-button restore",async()=>{await archiveRecord(TABLES.interventions,i,false);renderAll();renderArchiveLists();}));intBox.appendChild(item.root);});
-  const archivedEvents=data.trapEvents.filter(e=>e.archived_at).sort((a,b)=>b.event_date.localeCompare(a.event_date));
-  if(!archivedEvents.length)eventBox.innerHTML='<div class="history-empty">Aucun événement de piège archivé.</div>';
-  archivedEvents.forEach(e=>{const t=trapById(e.trap_id);const item=managementItem(`${fmtDate(e.event_date)} — ${t?.code||"—"}`,e.label||e.event_type,true);item.actions.append(button("Restaurer","small-button restore",async()=>{await archiveRecord(TABLES.trapEvents,e,false);renderAll();renderArchiveLists();}));eventBox.appendChild(item.root);});
+function openArchivesDialog() {
+  renderArchiveLists();
+  $("archivesDialog").showModal();
+}
+
+async function permanentlyDeleteArchived(entityType, record, label) {
+  if (!navigator.onLine) {
+    alert("La suppression définitive nécessite une connexion internet.");
+    return;
+  }
+
+  const confirmed = confirm(
+    `Supprimer définitivement ${label} ?\n\nCette action est irréversible et peut aussi supprimer les données qui en dépendent.`
+  );
+  if (!confirmed) return;
+
+  const { error } = await db.rpc("sam_piegeage_delete_archived", {
+    p_entity: entityType,
+    p_id: record.id
+  });
+
+  if (error) {
+    alert(`Suppression impossible : ${error.message}`);
+    return;
+  }
+
+  await loadData(true);
+  renderArchiveLists();
+}
+
+function appendArchiveActions(item, table, record, entityType, label) {
+  item.actions.append(
+    button("Restaurer", "small-button restore", async () => {
+      await archiveRecord(table, record, false);
+      renderAll();
+      renderArchiveLists();
+    }),
+    button("Supprimer définitivement", "small-button danger", async () => {
+      await permanentlyDeleteArchived(entityType, record, label);
+    })
+  );
+}
+
+function renderArchiveLists() {
+  const campaignBox = $("archivedCampaignList");
+  const parcelBox = $("archivedParcelList");
+  const trapBox = $("archivedTrapList");
+  const speciesBox = $("archivedSpeciesList");
+  const obsBox = $("archivedObservationList");
+  const intBox = $("archivedInterventionList");
+  const eventBox = $("archivedTrapEventList");
+
+  [campaignBox, parcelBox, trapBox, speciesBox, obsBox, intBox, eventBox].forEach(box => {
+    if (box) box.innerHTML = "";
+  });
+
+  const archivedCampaigns = data.campaigns
+    .filter(c => c.archived_at)
+    .sort((a, b) => b.year - a.year || a.name.localeCompare(b.name, "fr"));
+
+  if (!archivedCampaigns.length) campaignBox.innerHTML = '<div class="history-empty">Aucune campagne archivée.</div>';
+  archivedCampaigns.forEach(campaign => {
+    const item = managementItem(
+      `${campaign.year} — ${campaign.name}`,
+      `${campaign.pest_label} · ${campaign.protocol_type === "aphid" ? "protocole avancé" : "protocole simple"}`,
+      true
+    );
+    appendArchiveActions(item, TABLES.campaigns, campaign, "campaign", `la campagne « ${campaign.name} »`);
+    campaignBox.appendChild(item.root);
+  });
+
+  const archivedParcels = data.parcels
+    .filter(parcel => parcel.archived_at)
+    .sort((a, b) => a.exploitation.localeCompare(b.exploitation, "fr") || a.name.localeCompare(b.name, "fr"));
+
+  if (!archivedParcels.length) parcelBox.innerHTML = '<div class="history-empty">Aucune parcelle archivée.</div>';
+  archivedParcels.forEach(parcel => {
+    const item = managementItem(
+      `${parcel.exploitation} — ${parcel.name}`,
+      `${parcel.variety || ""} · ${fmtNumber(parcel.area_ha, 2)} ha`,
+      true
+    );
+    appendArchiveActions(item, TABLES.parcels, parcel, "parcel", `la parcelle « ${parcel.name} »`);
+    parcelBox.appendChild(item.root);
+  });
+
+  const archivedTraps = data.traps
+    .filter(trap => trap.archived_at)
+    .sort((a, b) => String(a.code).localeCompare(String(b.code), "fr"));
+
+  if (!archivedTraps.length) trapBox.innerHTML = '<div class="history-empty">Aucun piège archivé.</div>';
+  archivedTraps.forEach(trap => {
+    const parcel = parcelById(trap.parcel_id);
+    const campaign = campaignById(trap.campaign_id);
+    const item = managementItem(
+      `${parcel?.name || "—"} — ${trap.code}`,
+      `${campaign?.name || "—"} · ${trap.trap_type || "Type non renseigné"}`,
+      true
+    );
+    appendArchiveActions(item, TABLES.traps, trap, "trap", `le piège « ${trap.code} »`);
+    trapBox.appendChild(item.root);
+  });
+
+  const archivedSpecies = data.species
+    .filter(species => species.archived_at || species.active === false)
+    .sort((a, b) => a.scientific_name.localeCompare(b.scientific_name, "fr"));
+
+  if (!archivedSpecies.length) speciesBox.innerHTML = '<div class="history-empty">Aucune espèce archivée.</div>';
+  archivedSpecies.forEach(species => {
+    const item = managementItem(species.scientific_name, species.common_name || "", true);
+    appendArchiveActions(item, TABLES.species, species, "species", `l’espèce « ${species.scientific_name} »`);
+    speciesBox.appendChild(item.root);
+  });
+
+  const archivedObs = data.observations
+    .filter(obs => obs.archived_at)
+    .sort((a, b) => b.observed_on.localeCompare(a.observed_on));
+
+  if (!archivedObs.length) obsBox.innerHTML = '<div class="history-empty">Aucun relevé archivé.</div>';
+  archivedObs.forEach(obs => {
+    const trap = trapById(obs.trap_id);
+    const parcel = parcelById(trap?.parcel_id);
+    const item = managementItem(
+      `${fmtDate(obs.observed_on)} — ${parcel?.name || "—"} — ${trap?.code || "—"}`,
+      `${obs.total_captured} captures`,
+      true
+    );
+    appendArchiveActions(item, TABLES.observations, obs, "observation", `le relevé du ${fmtDate(obs.observed_on)}`);
+    obsBox.appendChild(item.root);
+  });
+
+  const archivedInts = data.interventions
+    .filter(intervention => intervention.archived_at)
+    .sort((a, b) => b.intervention_date.localeCompare(a.intervention_date));
+
+  if (!archivedInts.length) intBox.innerHTML = '<div class="history-empty">Aucune intervention archivée.</div>';
+  archivedInts.forEach(intervention => {
+    const item = managementItem(
+      `${fmtDate(intervention.intervention_date)} — ${intervention.intervention_type}`,
+      intervention.product || "",
+      true
+    );
+    appendArchiveActions(item, TABLES.interventions, intervention, "intervention", `l’intervention du ${fmtDate(intervention.intervention_date)}`);
+    intBox.appendChild(item.root);
+  });
+
+  const archivedEvents = data.trapEvents
+    .filter(event => event.archived_at)
+    .sort((a, b) => b.event_date.localeCompare(a.event_date));
+
+  if (!archivedEvents.length) eventBox.innerHTML = '<div class="history-empty">Aucun événement de piège archivé.</div>';
+  archivedEvents.forEach(event => {
+    const trap = trapById(event.trap_id);
+    const item = managementItem(
+      `${fmtDate(event.event_date)} — ${trap?.code || "—"}`,
+      event.label || event.event_type,
+      true
+    );
+    appendArchiveActions(item, TABLES.trapEvents, event, "trap_event", `l’événement du ${fmtDate(event.event_date)}`);
+    eventBox.appendChild(item.root);
+  });
 }
 
 function managementItem(title, subtitle, archived) {
@@ -804,7 +1001,7 @@ function managementItem(title, subtitle, archived) {
 // -----------------------------------------------------------------------------
 function renderCampaignSpeciesChoices(selectedIds = []) {
   const box=$("campaignSpeciesChoices");box.innerHTML="";
-  data.species.filter(s=>s.active!==false).forEach(s=>{const label=document.createElement("label");label.className="checkbox-card";label.innerHTML=`<input type="checkbox" value="${s.id}" ${selectedIds.includes(s.id)?"checked":""}> <span><b>${escapeHtml(s.scientific_name)}</b>${s.common_name?`<br><small>${escapeHtml(s.common_name)}</small>`:""}</span>`;box.appendChild(label);});
+  data.species.filter(s=>s.active!==false && !s.archived_at).forEach(s=>{const label=document.createElement("label");label.className="checkbox-card";label.innerHTML=`<input type="checkbox" value="${s.id}" ${selectedIds.includes(s.id)?"checked":""}> <span><b>${escapeHtml(s.scientific_name)}</b>${s.common_name?`<br><small>${escapeHtml(s.common_name)}</small>`:""}</span>`;box.appendChild(label);});
 }
 
 function toggleCampaignSpeciesSection(){const aphid=$("campaignProtocol").value==="aphid";$("campaignSpeciesSection").classList.toggle("hidden",!aphid);if(aphid&&!$("campaignId").value&&!$("campaignSpeciesChoices").querySelector("input:checked"))$("campaignSpeciesChoices").querySelectorAll("input").forEach(input=>input.checked=true);}
