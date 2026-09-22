@@ -649,17 +649,49 @@ const eventLinePlugin = {
     const x = chartInstance.scales.x;
     const y = chartInstance.scales.y;
     if (!x || !y) return;
+
     const ctx = chartInstance.ctx;
+
     events.forEach(event => {
       const index = chartInstance.data.labels.indexOf(event.date);
       if (index < 0) return;
+
       const px = x.getPixelForValue(index);
+
       ctx.save();
-      ctx.strokeStyle = "rgba(140,90,17,.75)";
+      ctx.strokeStyle = "#c99214";
       ctx.lineWidth = 1.5;
-      ctx.setLineDash([5,4]);
-      ctx.beginPath(); ctx.moveTo(px, y.top); ctx.lineTo(px, y.bottom); ctx.stroke();
+      ctx.setLineDash([5, 4]);
+      ctx.beginPath();
+      ctx.moveTo(px, y.top);
+      ctx.lineTo(px, y.bottom);
+      ctx.stroke();
       ctx.restore();
+
+      // Le libellé des interventions est affiché directement
+      // au-dessus du pointillé. Les événements de piège restent
+      // uniquement matérialisés par la ligne + la bulle sous le graphique.
+      if (event.kind === "intervention" && event.label) {
+        ctx.save();
+        ctx.font = "700 11px Arial, sans-serif";
+        ctx.fillStyle = "#8c5a11";
+        ctx.textBaseline = "bottom";
+
+        const measured = ctx.measureText(event.label).width;
+        const leftRoom = px - x.left;
+        const rightRoom = x.right - px;
+
+        if (leftRoom < measured / 2 + 8) {
+          ctx.textAlign = "left";
+        } else if (rightRoom < measured / 2 + 8) {
+          ctx.textAlign = "right";
+        } else {
+          ctx.textAlign = "center";
+        }
+
+        ctx.fillText(event.label, px, y.top - 8);
+        ctx.restore();
+      }
     });
   }
 };
@@ -716,10 +748,43 @@ function renderChart() {
   });
   const relevantTrapIds = new Set(series.map(s => s.trap.id));
   const trapEvents = activeRows(data.trapEvents).filter(e => relevantTrapIds.has(e.trap_id));
+
+  // Plusieurs interventions le même jour partagent le même pointillé.
+  // On affiche au-dessus uniquement le contenu du champ "Type d'intervention".
+  const interventionEventsByDate = new Map();
+  interventions.forEach(intervention => {
+    const date = intervention.intervention_date;
+    if (!interventionEventsByDate.has(date)) interventionEventsByDate.set(date, new Set());
+    if (intervention.intervention_type) {
+      interventionEventsByDate.get(date).add(intervention.intervention_type.trim());
+    }
+  });
+
+  const interventionGraphEvents = [...interventionEventsByDate.entries()].map(([date, types]) => ({
+    date,
+    kind: "intervention",
+    label: [...types].filter(Boolean).join(" / ") || "Intervention"
+  }));
+
+  // Pour les pièges, une seule ligne pointillée suffit lorsqu'il y a
+  // plusieurs événements positionnés à la même date affichée.
+  const trapGraphEventsByDate = new Map();
+  trapEvents.forEach(event => {
+    const date = eventDateForProcessing(event.event_date, anchor);
+    if (!trapGraphEventsByDate.has(date)) {
+      trapGraphEventsByDate.set(date, {
+        date,
+        kind: "trap",
+        label: "Piège"
+      });
+    }
+  });
+
   const events = [
-    ...interventions.map(i => ({ date: i.intervention_date, label: `${i.intervention_type}${i.product ? ` — ${i.product}` : ""}` })),
-    ...trapEvents.map(e => ({ date: eventDateForProcessing(e.event_date, anchor), label: `${e.event_type} — ${e.label || trapById(e.trap_id)?.code || "piège"}` }))
+    ...interventionGraphEvents,
+    ...trapGraphEventsByDate.values()
   ];
+
   events.forEach(e => labelsSet.add(e.date));
   const labels = [...labelsSet].sort();
 
@@ -739,35 +804,108 @@ function renderChart() {
     data: { labels: labels.map(fmtDate), datasets },
     options: {
       responsive: true, maintainAspectRatio: false, interaction: { mode: "nearest", intersect: false },
+      layout: { padding: { top: 28 } },
       plugins: { legend: { position: "bottom" }, samEvents: { events: events.map(e => ({ ...e, date: fmtDate(e.date) })) } },
       scales: { y: { beginAtZero: true, title: { display: true, text: unitLabel } }, x: { ticks: { maxRotation: 45, minRotation: 0 } } }
     }
   });
 
-  const legend = $("eventLegend"); legend.innerHTML = "";
-  const allEvents = [...interventions.map(i => ({ type: "Intervention", date: i.intervention_date, label: `${i.intervention_type}${i.product ? ` — ${i.product}` : ""}`, record: i, table: TABLES.interventions })), ...trapEvents.map(e => ({ type: "Piège", date: e.event_date, label: e.label || e.event_type, record: e, table: TABLES.trapEvents }))].sort((a,b)=>a.date.localeCompare(b.date));
-  allEvents.forEach(event => {
-    const chip = document.createElement("span"); chip.className = "event-chip"; chip.textContent = `${fmtDate(event.date)} · ${event.type} : ${event.label}`;
-    if (currentUser) {
-      const btn = document.createElement("button"); btn.type = "button"; btn.className = "event-archive-button"; btn.textContent = " ×"; btn.title = "Archiver";
-      btn.style.cssText = "border:0;background:transparent;color:inherit;font-weight:900;padding:0 0 0 4px";
-      btn.addEventListener("click", async () => {
-        const confirmed = await showSamConfirmation({
-          title: "Archiver cet événement ?",
-          message: "L’événement sera déplacé dans les Archives et pourra être restauré plus tard.",
-          confirmText: "Archiver",
-          mode: "archive"
+  const legend = $("eventLegend");
+  legend.innerHTML = "";
+
+  const groupedInstallations = new Map();
+  const otherTrapEvents = [];
+
+  trapEvents.forEach(event => {
+    if (event.event_type === "installation") {
+      if (!groupedInstallations.has(event.event_date)) {
+        groupedInstallations.set(event.event_date, []);
+      }
+      groupedInstallations.get(event.event_date).push(event);
+    } else {
+      otherTrapEvents.push(event);
+    }
+  });
+
+  const trapLegendEvents = [];
+
+  groupedInstallations.forEach((records, date) => {
+    const parcelNames = [];
+    const seenParcelIds = new Set();
+
+    records.forEach(record => {
+      const trap = trapById(record.trap_id);
+      const parcel = parcelById(trap?.parcel_id);
+      if (!parcel || seenParcelIds.has(parcel.id)) return;
+      seenParcelIds.add(parcel.id);
+      parcelNames.push(`parcelle ${parcel.name}`);
+    });
+
+    trapLegendEvents.push({
+      type: "Piège",
+      date,
+      label: `Installation ${parcelNames.join(", ")}`,
+      records,
+      table: TABLES.trapEvents
+    });
+  });
+
+  otherTrapEvents.forEach(record => {
+    const trap = trapById(record.trap_id);
+    const parcel = parcelById(trap?.parcel_id);
+    const eventName =
+      record.event_type === "replacement" ? "Remplacement" :
+      record.event_type === "attractant_change" ? "Changement attractif" :
+      (record.label || record.event_type);
+
+    trapLegendEvents.push({
+      type: "Piège",
+      date: record.event_date,
+      label: `${eventName}${parcel ? ` parcelle ${parcel.name}` : ""}`,
+      records: [record],
+      table: TABLES.trapEvents
+    });
+  });
+
+  trapLegendEvents
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .forEach(event => {
+      const chip = document.createElement("span");
+      chip.className = "event-chip";
+      chip.textContent = `${fmtDate(event.date)} · ${event.type} : ${event.label}`;
+
+      if (currentUser) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "event-archive-button";
+        btn.textContent = " ×";
+        btn.title = event.records.length > 1 ? "Archiver ces événements" : "Archiver";
+        btn.style.cssText = "border:0;background:transparent;color:inherit;font-weight:900;padding:0 0 0 4px";
+
+        btn.addEventListener("click", async () => {
+          const confirmed = await showSamConfirmation({
+            title: event.records.length > 1 ? "Archiver ces installations ?" : "Archiver cet événement ?",
+            message: event.records.length > 1
+              ? `${event.records.length} installations seront déplacées dans les Archives et pourront être restaurées plus tard.`
+              : "L’événement sera déplacé dans les Archives et pourra être restauré plus tard.",
+            confirmText: "Archiver",
+            mode: "archive"
+          });
+
+          if (!confirmed) return;
+
+          for (const record of event.records) {
+            await archiveRecord(event.table, record, true);
+          }
+
+          renderAll();
         });
 
-        if (!confirmed) return;
+        chip.appendChild(btn);
+      }
 
-        await archiveRecord(event.table, event.record, true);
-        renderAll();
-      });
-      chip.appendChild(btn);
-    }
-    legend.appendChild(chip);
-  });
+      legend.appendChild(chip);
+    });
 }
 
 function renderHistory() {
@@ -1696,8 +1834,25 @@ function exportChartSvg() {
   eventLines.forEach(event => {
     const index = labels.indexOf(String(event.date));
     if (index < 0) return;
+
     const x = xForIndex(index);
-    svg += `<line x1="${x}" y1="${margin.top}" x2="${x}" y2="${margin.top + plotHeight}" stroke="#8c5a11" stroke-width="1.5" stroke-dasharray="6 5" opacity=".8"/>`;
+
+    svg += `<line x1="${x}" y1="${margin.top}" x2="${x}" y2="${margin.top + plotHeight}" stroke="#c99214" stroke-width="1.5" stroke-dasharray="6 5" opacity=".9"/>`;
+
+    if (event.kind === "intervention" && event.label) {
+      let anchor = "middle";
+      let textX = x;
+
+      if (x < margin.left + 120) {
+        anchor = "start";
+        textX = x + 4;
+      } else if (x > margin.left + plotWidth - 120) {
+        anchor = "end";
+        textX = x - 4;
+      }
+
+      svg += `<text x="${textX}" y="${margin.top - 10}" text-anchor="${anchor}" font-size="12" font-weight="700" fill="#8c5a11">${escapeXml(event.label)}</text>`;
+    }
   });
 
   // Séries.
@@ -1753,7 +1908,7 @@ function exportChartSvg() {
   // Légende des interventions.
   if (eventLines.length) {
     svg += `<line x1="${margin.left}" y1="${height - 28}" x2="${margin.left + 20}" y2="${height - 28}" stroke="#8c5a11" stroke-width="1.5" stroke-dasharray="6 5"/>`;
-    svg += `<text x="${margin.left + 28}" y="${height - 24}" font-size="12" class="muted">Intervention / événement de piège</text>`;
+    svg += `<text x="${margin.left + 28}" y="${height - 24}" font-size="12" class="muted">Repère d’intervention / événement de piège</text>`;
   }
 
   svg += `</svg>`;
