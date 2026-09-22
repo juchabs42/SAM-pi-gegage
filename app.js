@@ -838,7 +838,7 @@ function renderChart() {
       const parcel = parcelById(trap?.parcel_id);
       if (!parcel || seenParcelIds.has(parcel.id)) return;
       seenParcelIds.add(parcel.id);
-      parcelNames.push(`parcelle ${parcel.name}`);
+      parcelNames.push(parcel.name);
     });
 
     trapLegendEvents.push({
@@ -861,7 +861,7 @@ function renderChart() {
     trapLegendEvents.push({
       type: "Piège",
       date: record.event_date,
-      label: `${eventName}${parcel ? ` parcelle ${parcel.name}` : ""}`,
+      label: `${eventName}${parcel ? ` ${parcel.name}` : ""}`,
       records: [record],
       table: TABLES.trapEvents
     });
