@@ -393,9 +393,24 @@ function campaignSpecies(campaignId) {
 }
 
 function parcelsForCampaign(campaignId) {
-  const linked = new Set(data.campaignParcels.filter(link => link.campaign_id === campaignId).map(link => link.parcel_id));
-  activeRows(data.traps).filter(t => t.campaign_id === campaignId).forEach(t => linked.add(t.parcel_id));
-  return activeRows(data.parcels).filter(p => linked.has(p.id)).sort((a, b) => a.name.localeCompare(b.name, "fr"));
+  // Une parcelle n'est proposée dans une campagne que si elle possède
+  // actuellement au moins un piège non archivé dans cette campagne.
+  // Les anciens liens campaign_parcels restent conservés en base pour
+  // l'historique, mais ne pilotent plus les filtres et la saisie courante.
+  const activeParcelIds = new Set(
+    activeRows(data.traps)
+      .filter(trap => trap.campaign_id === campaignId)
+      .map(trap => trap.parcel_id)
+  );
+
+  return activeRows(data.parcels)
+    .filter(parcel => activeParcelIds.has(parcel.id))
+    .sort((a, b) =>
+      a.name.localeCompare(b.name, "fr") ||
+      String(a.exploitation || "").localeCompare(String(b.exploitation || ""), "fr") ||
+      String(a.variety || "").localeCompare(String(b.variety || ""), "fr") ||
+      Number(a.area_ha || 0) - Number(b.area_ha || 0)
+    );
 }
 
 function trapsForCampaign(campaignId, parcelId = "all") {
