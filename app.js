@@ -49,6 +49,10 @@ const data = {
 // -----------------------------------------------------------------------------
 // Chaque filtre garde l'ensemble des identifiants actuellement cochés.
 // Par défaut, tout est coché (équivalent à l'ancien "Tous" / "Toutes").
+// Mémorise la campagne pour laquelle les filtres ont été calculés, afin de
+// savoir s'il faut les remettre à "tout coché" (changement de campagne) ou
+// simplement conserver la sélection en cours (rechargement de données).
+let lastFilterCampaignId = undefined;
 const parcelFilterState = new Set();
 const trapFilterState = new Set();
 // Pas de valeur sentinelle "total" / "tous" : cocher toutes les options
@@ -536,11 +540,25 @@ function populateMainFilters() {
 
 function populateParcelFilter() {
   const campaignId = $("campaignFilter").value;
+
+  // Si on change réellement de campagne, on repart sur "tout coché" pour
+  // les 4 filtres (parcelle, piège, espèce, sexe), même si une parcelle ou
+  // un piège porte le même identifiant dans les deux campagnes : le choix
+  // par défaut doit toujours être "tout" pour chaque nouvelle campagne.
+  if (campaignId !== lastFilterCampaignId) {
+    parcelFilterState.clear();
+    trapFilterState.clear();
+    speciesFilterState.clear();
+    sexFilterState.clear();
+    lastFilterCampaignId = campaignId;
+  }
+
   const parcels = parcelsForCampaign(campaignId);
   const availableIds = parcels.map(p => p.id);
 
   // On conserve la sélection en cours quand elle reste valide pour la
-  // nouvelle campagne ; sinon on repart sur "toutes les parcelles".
+  // même campagne (ex. rechargement en arrière-plan) ; sinon on repart
+  // sur "toutes les parcelles".
   const kept = [...parcelFilterState].filter(id => availableIds.includes(id));
   parcelFilterState.clear();
   (kept.length ? kept : availableIds).forEach(id => parcelFilterState.add(id));
