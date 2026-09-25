@@ -91,10 +91,70 @@
     <section class="panel filter-panel">
       <div class="filter-grid">
         <label>Campagne<select id="campaignFilter"></select></label>
-        <label>Parcelle<select id="parcelFilter"></select></label>
-        <label>Piège<select id="trapFilter"></select></label>
-        <label>Donnée<select id="speciesFilter"></select></label>
-        <label>Sexe<select id="sexFilter"><option value="all">Tous</option><option value="male">Mâles</option><option value="female">Femelles</option><option value="undetermined">Indéterminés</option></select></label>
+        <div class="ms-field" id="parcelFilterDropdown">
+          <span class="field-label">Parcelle</span>
+          <div class="ms-dropdown">
+            <button type="button" class="ms-toggle" id="parcelFilterToggle" aria-haspopup="listbox" aria-expanded="false">
+              <span class="ms-toggle-text" id="parcelFilterSummary">Toutes les parcelles</span>
+              <span class="ms-toggle-caret" aria-hidden="true">▾</span>
+            </button>
+            <div class="ms-panel hidden" id="parcelFilterPanel" role="listbox" aria-multiselectable="true">
+              <div class="ms-panel-actions">
+                <button type="button" class="ms-mini-link" data-ms-action="all">Tout cocher</button>
+                <button type="button" class="ms-mini-link" data-ms-action="none">Tout décocher</button>
+              </div>
+              <div class="ms-options" id="parcelFilterOptions"></div>
+            </div>
+          </div>
+        </div>
+        <div class="ms-field" id="trapFilterDropdown">
+          <span class="field-label">Piège</span>
+          <div class="ms-dropdown">
+            <button type="button" class="ms-toggle" id="trapFilterToggle" aria-haspopup="listbox" aria-expanded="false">
+              <span class="ms-toggle-text" id="trapFilterSummary">Tous les pièges</span>
+              <span class="ms-toggle-caret" aria-hidden="true">▾</span>
+            </button>
+            <div class="ms-panel hidden" id="trapFilterPanel" role="listbox" aria-multiselectable="true">
+              <div class="ms-panel-actions">
+                <button type="button" class="ms-mini-link" data-ms-action="all">Tout cocher</button>
+                <button type="button" class="ms-mini-link" data-ms-action="none">Tout décocher</button>
+              </div>
+              <div class="ms-options" id="trapFilterOptions"></div>
+            </div>
+          </div>
+        </div>
+        <div class="ms-field" id="speciesFilterDropdown">
+          <span class="field-label">Donnée</span>
+          <div class="ms-dropdown">
+            <button type="button" class="ms-toggle" id="speciesFilterToggle" aria-haspopup="listbox" aria-expanded="false">
+              <span class="ms-toggle-text" id="speciesFilterSummary">Total des captures</span>
+              <span class="ms-toggle-caret" aria-hidden="true">▾</span>
+            </button>
+            <div class="ms-panel hidden" id="speciesFilterPanel" role="listbox" aria-multiselectable="true">
+              <div class="ms-panel-actions">
+                <button type="button" class="ms-mini-link" data-ms-action="all">Tout cocher</button>
+                <button type="button" class="ms-mini-link" data-ms-action="none">Tout décocher</button>
+              </div>
+              <div class="ms-options" id="speciesFilterOptions"></div>
+            </div>
+          </div>
+        </div>
+        <div class="ms-field" id="sexFilterDropdown">
+          <span class="field-label">Sexe</span>
+          <div class="ms-dropdown">
+            <button type="button" class="ms-toggle" id="sexFilterToggle" aria-haspopup="listbox" aria-expanded="false">
+              <span class="ms-toggle-text" id="sexFilterSummary">Tous</span>
+              <span class="ms-toggle-caret" aria-hidden="true">▾</span>
+            </button>
+            <div class="ms-panel hidden" id="sexFilterPanel" role="listbox" aria-multiselectable="true">
+              <div class="ms-panel-actions">
+                <button type="button" class="ms-mini-link" data-ms-action="all">Tout cocher</button>
+                <button type="button" class="ms-mini-link" data-ms-action="none">Tout décocher</button>
+              </div>
+              <div class="ms-options" id="sexFilterOptions"></div>
+            </div>
+          </div>
+        </div>
         <label>Unité<select id="unitFilter"><option value="raw">Captures brutes</option><option value="per_day">Captures / jour</option></select></label>
         <label>Courbe<select id="processingFilter"><option value="observed">Valeurs observées</option><option value="weekly">Total hebdomadaire</option><option value="smoothed">Lissage</option></select></label>
         <div class="export-actions">
@@ -273,9 +333,11 @@
   <dialog id="speciesDialog" class="app-dialog">
     <div class="dialog-header"><div><p class="panel-kicker">Référentiel</p><h2>Espèces suivies</h2></div><button class="close-button" data-close="speciesDialog" type="button">×</button></div>
     <form id="speciesForm" class="dialog-form">
+      <input id="speciesId" type="hidden">
       <label>Nom scientifique<input id="speciesScientific" type="text" placeholder="Ex. Dysaphis plantaginea" required></label>
       <label>Nom commun<input id="speciesCommon" type="text"></label>
-      <button class="primary-button" type="submit">Ajouter l'espèce</button>
+      <button class="primary-button" id="speciesSubmitButton" type="submit">Ajouter l'espèce</button>
+      <button class="secondary-button hidden" id="speciesCancelEditButton" type="button">Annuler la modification</button>
     </form>
     <div id="speciesMessage" class="form-message"></div>
     <div class="management-section"><div id="speciesManageList" class="management-list"></div></div>

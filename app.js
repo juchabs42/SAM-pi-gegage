@@ -44,6 +44,104 @@ const data = {
   traps: [], trapEvents: [], observations: [], details: [], interventions: [], interventionParcels: []
 };
 
+// -----------------------------------------------------------------------------
+// Filtres multi-sélection (Parcelle, Piège, Donnée, Sexe)
+// -----------------------------------------------------------------------------
+// Chaque filtre garde l'ensemble des identifiants actuellement cochés.
+// Par défaut, tout est coché (équivalent à l'ancien "Tous" / "Toutes").
+const parcelFilterState = new Set();
+const trapFilterState = new Set();
+const speciesFilterState = new Set(["total"]);
+const sexFilterState = new Set(["all"]);
+const SEX_FILTER_OPTIONS = [
+  { value: "all", label: "Tous" },
+  { value: "male", label: "Mâles" },
+  { value: "female", label: "Femelles" },
+  { value: "undetermined", label: "Indéterminés" }
+];
+
+function singleSelected(state) {
+  return state.size === 1 ? [...state][0] : null;
+}
+
+function summarizeSelection(options, state, allLabel, emptyLabel = "Aucune sélection") {
+  if (!options.length) return "Aucune option";
+  if (state.size === 0) return emptyLabel;
+  if (options.every(o => state.has(o.value))) return allLabel;
+  const labels = options.filter(o => state.has(o.value)).map(o => o.label);
+  if (!labels.length) return emptyLabel;
+  return labels.length <= 2 ? labels.join(", ") : `${labels.slice(0, 2).join(", ")} +${labels.length - 2}`;
+}
+
+function buildCheckOptions(container, options, state, onToggle) {
+  if (!container) return;
+  container.innerHTML = "";
+  if (!options.length) {
+    container.innerHTML = '<p class="ms-empty">Aucune option disponible.</p>';
+    return;
+  }
+  options.forEach(opt => {
+    const label = document.createElement("label");
+    label.className = "checkbox-card ms-option";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.value = String(opt.value);
+    input.checked = state.has(opt.value);
+    input.addEventListener("change", () => {
+      if (input.checked) state.add(opt.value); else state.delete(opt.value);
+      onToggle();
+    });
+    const span = document.createElement("span");
+    span.textContent = opt.label;
+    label.append(input, span);
+    container.appendChild(label);
+  });
+}
+
+// Reconstruit les cases à cocher d'un filtre + son résumé, et relie
+// les boutons "Tout cocher" / "Tout décocher" du panneau.
+function refreshMultiFilter(key, options, state, allLabel, onChange) {
+  const container = $(`${key}FilterOptions`);
+  const summaryEl = $(`${key}FilterSummary`);
+  const panel = $(`${key}FilterPanel`);
+
+  function rerender() {
+    buildCheckOptions(container, options, state, () => { rerender(); onChange(); });
+    if (summaryEl) summaryEl.textContent = summarizeSelection(options, state, allLabel);
+  }
+  rerender();
+
+  const allBtn = panel?.querySelector('[data-ms-action="all"]');
+  const noneBtn = panel?.querySelector('[data-ms-action="none"]');
+  if (allBtn) allBtn.onclick = () => { options.forEach(o => state.add(o.value)); rerender(); onChange(); };
+  if (noneBtn) noneBtn.onclick = () => { state.clear(); rerender(); onChange(); };
+}
+
+// Ouverture / fermeture des panneaux déroulants (un seul ouvert à la fois).
+function wireDropdownToggle(key) {
+  const toggle = $(`${key}FilterToggle`);
+  const panel = $(`${key}FilterPanel`);
+  if (!toggle || !panel) return;
+  toggle.addEventListener("click", event => {
+    event.stopPropagation();
+    if (toggle.disabled) return;
+    const isOpen = !panel.classList.contains("hidden");
+    closeAllFilterPanels();
+    if (!isOpen) {
+      panel.classList.remove("hidden");
+      toggle.setAttribute("aria-expanded", "true");
+    }
+  });
+  // Un clic à l'intérieur du panneau (case à cocher, "Tout cocher"…)
+  // ne doit pas remonter jusqu'au document et refermer le panneau.
+  panel.addEventListener("click", event => event.stopPropagation());
+}
+
+function closeAllFilterPanels() {
+  document.querySelectorAll(".ms-panel").forEach(p => p.classList.add("hidden"));
+  document.querySelectorAll(".ms-toggle").forEach(t => t.setAttribute("aria-expanded", "false"));
+}
+
 const $ = id => document.getElementById(id);
 const uuid = () => crypto.randomUUID();
 const todayISO = () => new Date().toISOString().slice(0, 10);
@@ -437,37 +535,66 @@ function populateMainFilters() {
 
 function populateParcelFilter() {
   const campaignId = $("campaignFilter").value;
-  const previous = $("parcelFilter").value;
   const parcels = parcelsForCampaign(campaignId);
-  fillSelect($("parcelFilter"), [{ value: "all", label: "Toutes les parcelles" }, ...parcels.map(p => ({ value: p.id, label: parcelLabel(p) }))], previous || "all");
+  const availableIds = parcels.map(p => p.id);
+
+  // On conserve la sélection en cours quand elle reste valide pour la
+  // nouvelle campagne ; sinon on repart sur "toutes les parcelles".
+  const kept = [...parcelFilterState].filter(id => availableIds.includes(id));
+  parcelFilterState.clear();
+  (kept.length ? kept : availableIds).forEach(id => parcelFilterState.add(id));
+
+  const options = parcels.map(p => ({ value: p.id, label: parcelLabel(p) }));
+  refreshMultiFilter("parcel", options, parcelFilterState, "Toutes les parcelles", () => {
+    populateTrapFilter();
+  });
   populateTrapFilter();
 }
 
 function populateTrapFilter() {
   const campaignId = $("campaignFilter").value;
-  const parcelId = $("parcelFilter").value || "all";
-  const previous = $("trapFilter").value;
-  const traps = trapsForCampaign(campaignId, parcelId);
-  fillSelect($("trapFilter"), [{ value: "all", label: "Tous les pièges" }, ...traps.map(t => ({ value: t.id, label: `${t.code}${parcelById(t.parcel_id) ? ` — ${parcelLabel(parcelById(t.parcel_id), { compact: true })}` : ""}` }))], previous || "all");
+  const traps = trapsForCampaign(campaignId).filter(t => parcelFilterState.has(t.parcel_id));
+  const availableIds = traps.map(t => t.id);
+
+  const kept = [...trapFilterState].filter(id => availableIds.includes(id));
+  trapFilterState.clear();
+  (kept.length ? kept : availableIds).forEach(id => trapFilterState.add(id));
+
+  const options = traps.map(t => ({ value: t.id, label: `${t.code}${parcelById(t.parcel_id) ? ` — ${parcelLabel(parcelById(t.parcel_id), { compact: true })}` : ""}` }));
+  refreshMultiFilter("trap", options, trapFilterState, "Tous les pièges", () => {
+    renderDashboard();
+  });
   populateSpeciesFilter();
 }
 
 function populateSpeciesFilter() {
   const campaign = campaignById($("campaignFilter").value);
-  const previous = $("speciesFilter").value;
-  const opts = [{ value: "total", label: "Total des captures" }];
+  const options = [{ value: "total", label: "Total des captures" }];
 
   if (campaign?.protocol_type === "aphid") {
-    campaignSpecies(campaign.id).forEach(s => opts.push({ value: s.id, label: s.scientific_name }));
+    campaignSpecies(campaign.id).forEach(s => options.push({ value: s.id, label: s.scientific_name }));
   }
 
-  fillSelect($("speciesFilter"), opts, previous || "total");
+  const availableValues = options.map(o => o.value);
+  const kept = [...speciesFilterState].filter(v => availableValues.includes(v));
+  speciesFilterState.clear();
+  (kept.length ? kept : ["total"]).forEach(v => speciesFilterState.add(v));
+
+  refreshMultiFilter("species", options, speciesFilterState, "Total des captures", () => {
+    renderDashboard();
+  });
 
   // Le protocole avancé permet de filtrer M / F / indéterminés,
   // y compris lorsque "Total des captures" est sélectionné.
   const advanced = campaign?.protocol_type === "aphid";
-  $("sexFilter").disabled = !advanced;
-  if (!advanced) $("sexFilter").value = "all";
+  $("sexFilterToggle").disabled = !advanced;
+  if (!advanced) {
+    sexFilterState.clear();
+    sexFilterState.add("all");
+  }
+  refreshMultiFilter("sex", SEX_FILTER_OPTIONS, sexFilterState, "Tous", () => {
+    renderDashboard();
+  });
 
   renderDashboard();
 }
@@ -520,14 +647,12 @@ function renderAll() {
 // -----------------------------------------------------------------------------
 function selectedObservations() {
   const campaignId = $("campaignFilter").value;
-  const parcelId = $("parcelFilter").value || "all";
-  const trapId = $("trapFilter").value || "all";
   return activeRows(data.observations).filter(obs => {
     if (obs.campaign_id !== campaignId) return false;
     const trap = trapById(obs.trap_id);
     if (!trap || trap.archived_at) return false;
-    if (parcelId !== "all" && trap.parcel_id !== parcelId) return false;
-    if (trapId !== "all" && obs.trap_id !== trapId) return false;
+    if (!parcelFilterState.has(trap.parcel_id)) return false;
+    if (!trapFilterState.has(obs.trap_id)) return false;
     return true;
   }).sort((a, b) => a.observed_on.localeCompare(b.observed_on));
 }
@@ -538,27 +663,35 @@ function identifiedTotal(obsId) {
   return detailsForObservation(obsId).reduce((sum, d) => sum + Number(d.males || 0) + Number(d.females || 0) + Number(d.undetermined || 0), 0);
 }
 
+// Espèce(s) et sexe(s) cochés dans les filtres "Donnée" et "Sexe" sont
+// combinés en une somme : plusieurs espèces et/ou plusieurs catégories
+// de sexe peuvent être affichées ensemble sur la même courbe.
 function observationValue(obs) {
-  const speciesId = $("speciesFilter").value;
-  const sex = $("sexFilter").value;
+  const useTotal = speciesFilterState.has("total") || speciesFilterState.size === 0;
+  const useAllSex = sexFilterState.has("all") || sexFilterState.size === 0;
 
-  if (speciesId === "total") {
-    if (sex === "all") return Number(obs.total_captured || 0);
-
+  if (useTotal) {
+    if (useAllSex) return Number(obs.total_captured || 0);
     const details = detailsForObservation(obs.id);
-    if (sex === "male") return details.reduce((sum, detail) => sum + Number(detail.males || 0), 0);
-    if (sex === "female") return details.reduce((sum, detail) => sum + Number(detail.females || 0), 0);
-    if (sex === "undetermined") return details.reduce((sum, detail) => sum + Number(detail.undetermined || 0), 0);
-
-    return Number(obs.total_captured || 0);
+    let sum = 0;
+    if (sexFilterState.has("male")) sum += details.reduce((s, d) => s + Number(d.males || 0), 0);
+    if (sexFilterState.has("female")) sum += details.reduce((s, d) => s + Number(d.females || 0), 0);
+    if (sexFilterState.has("undetermined")) sum += details.reduce((s, d) => s + Number(d.undetermined || 0), 0);
+    return sum;
   }
 
-  const detail = data.details.find(d => d.observation_id === obs.id && d.species_id === speciesId);
-  if (!detail) return 0;
-  if (sex === "male") return Number(detail.males || 0);
-  if (sex === "female") return Number(detail.females || 0);
-  if (sex === "undetermined") return Number(detail.undetermined || 0);
-  return Number(detail.males || 0) + Number(detail.females || 0) + Number(detail.undetermined || 0);
+  const details = data.details.filter(d => d.observation_id === obs.id && speciesFilterState.has(d.species_id));
+  if (!details.length) return 0;
+  if (useAllSex) {
+    return details.reduce((sum, d) => sum + Number(d.males || 0) + Number(d.females || 0) + Number(d.undetermined || 0), 0);
+  }
+  let sum = 0;
+  details.forEach(d => {
+    if (sexFilterState.has("male")) sum += Number(d.males || 0);
+    if (sexFilterState.has("female")) sum += Number(d.females || 0);
+    if (sexFilterState.has("undetermined")) sum += Number(d.undetermined || 0);
+  });
+  return sum;
 }
 
 function daysBetween(a, b) {
@@ -726,11 +859,24 @@ function renderMetrics() {
   $("recordPeriod").textContent = `${fmtDate(observations[0].observed_on)} → ${fmtDate(last.observed_on)}`;
 }
 
+function speciesFilterLabel() {
+  if (speciesFilterState.has("total") || speciesFilterState.size === 0) return "Total des captures";
+  const names = [...speciesFilterState].map(id => speciesById(id)?.scientific_name).filter(Boolean);
+  if (!names.length) return "Espèce";
+  return names.length <= 2 ? names.join(" + ") : `${names.slice(0, 2).join(" + ")} +${names.length - 2}`;
+}
+
+function sexFilterLabel() {
+  if (sexFilterState.has("all") || sexFilterState.size === 0) return "";
+  const labelMap = { male: "Mâles", female: "Femelles", undetermined: "Indéterminés" };
+  const labels = [...sexFilterState].map(v => labelMap[v]).filter(Boolean);
+  return labels.length ? ` — ${labels.join(" + ")}` : "";
+}
+
 function renderChart() {
   const { campaign, series, anchor } = seriesData();
-  const speciesId = $("speciesFilter").value;
-  const speciesLabel = speciesId === "total" ? "Total des captures" : (speciesById(speciesId)?.scientific_name || "Espèce");
-  const sexLabel = { all: "", male: " — Mâles", female: " — Femelles", undetermined: " — Indéterminés" }[$("sexFilter").value] || "";
+  const speciesLabel = speciesFilterLabel();
+  const sexLabel = sexFilterLabel();
   const unitLabel = $("unitFilter").value === "per_day" ? "captures / jour" : "captures";
   const processLabel = { observed: "valeurs observées", weekly: "total hebdomadaire", smoothed: "lissage moyenne semaine courante + précédente" }[$("processingFilter").value];
   $("chartTitle").textContent = `${speciesLabel}${sexLabel} — ${unitLabel} — ${processLabel}`;
@@ -739,12 +885,13 @@ function renderChart() {
   const labelsSet = new Set();
   series.forEach(s => s.points.forEach(p => labelsSet.add(p.date)));
 
-  const selectedParcelId = $("parcelFilter").value || "all";
+  const allCampaignParcelIds = parcelsForCampaign(campaign?.id).map(p => p.id);
+  const noParcelFilterApplied = allCampaignParcelIds.length > 0 && allCampaignParcelIds.every(id => parcelFilterState.has(id));
   const interventions = activeRows(data.interventions).filter(i => {
     if (i.campaign_id !== campaign?.id) return false;
-    if (selectedParcelId === "all") return true;
+    if (noParcelFilterApplied) return true;
     const links = data.interventionParcels.filter(l => l.intervention_id === i.id);
-    return !links.length || links.some(l => l.parcel_id === selectedParcelId);
+    return !links.length || links.some(l => parcelFilterState.has(l.parcel_id));
   });
   const relevantTrapIds = new Set(series.map(s => s.trap.id));
   const trapEvents = activeRows(data.trapEvents).filter(e => relevantTrapIds.has(e.trap_id));
@@ -1079,6 +1226,7 @@ function renderSpeciesList() {
       const item = managementItem(species.scientific_name, species.common_name || "", archived);
 
       item.actions.append(
+        button("Modifier", "small-button", () => openSpeciesEditForm(species)),
         button(
           archived ? "Restaurer" : "Archiver",
           `small-button ${archived ? "restore" : "danger"}`,
@@ -1931,7 +2079,7 @@ function exportChartSvg() {
 // -----------------------------------------------------------------------------
 function renderObservationSpeciesRows(existingDetails=[]){const campaign=campaignById($("observationCampaign")?.value);const section=$("aphidDetailSection");const box=$("aphidSpeciesRows");if(!campaign||campaign.protocol_type!=="aphid"){section.classList.add("hidden");box.innerHTML="";return;}section.classList.remove("hidden");box.innerHTML="";campaignSpecies(campaign.id).forEach(s=>{const d=existingDetails.find(x=>x.species_id===s.id);const row=document.createElement("div");row.className="species-detail-row";row.dataset.speciesId=s.id;row.innerHTML=`<div class="species-name"><strong>${escapeHtml(s.scientific_name)}</strong><span>${escapeHtml(s.common_name||"")}</span></div><label>Mâles<input class="male-input" type="number" min="0" step="1" value="${d?.males||0}"></label><label>Femelles<input class="female-input" type="number" min="0" step="1" value="${d?.females||0}"></label><label>Indéterminés<input class="undetermined-input" type="number" min="0" step="1" value="${d?.undetermined||0}"></label>`;box.appendChild(row);});updateIdentificationSummary();}
 function updateIdentificationSummary(){const rows=[...$("aphidSpeciesRows").querySelectorAll(".species-detail-row")];const identified=rows.reduce((sum,row)=>sum+Number(row.querySelector(".male-input").value||0)+Number(row.querySelector(".female-input").value||0)+Number(row.querySelector(".undetermined-input").value||0),0);const total=Number($("observationTotal").value||0);$("identificationSummary").textContent=`${identified} identifié${identified>1?"s":""} · ${Math.max(0,total-identified)} restant${Math.max(0,total-identified)>1?"s":""}`;$("identificationSummary").classList.toggle("over",identified>total);}
-function openObservationDialog(obs=null){$("observationForm").reset();resetExcelImport();$("observationId").value=obs?.id||"";$("observationDialogTitle").textContent=obs?"Modifier / compléter le relevé":"Ajouter un relevé";populateAdminSelects();const campaignId=obs?.campaign_id||$("campaignFilter").value||activeCampaigns()[0]?.id;$("observationCampaign").value=campaignId||"";const trap=obs?trapById(obs.trap_id):null;populateObservationParcelSelect(trap?.parcel_id||($("parcelFilter").value!=="all"?$("parcelFilter").value:null),obs?.trap_id||($("trapFilter").value!=="all"?$("trapFilter").value:null));$("observationDate").value=obs?.observed_on||todayISO();$("observationTotal").value=obs?.total_captured??"";$("observationComment").value=obs?.comment||"";renderObservationSpeciesRows(obs?detailsForObservation(obs.id):[]);setMessage($("observationMessage"));$("observationDialog").showModal();}
+function openObservationDialog(obs=null){$("observationForm").reset();resetExcelImport();$("observationId").value=obs?.id||"";$("observationDialogTitle").textContent=obs?"Modifier / compléter le relevé":"Ajouter un relevé";populateAdminSelects();const campaignId=obs?.campaign_id||$("campaignFilter").value||activeCampaigns()[0]?.id;$("observationCampaign").value=campaignId||"";const trap=obs?trapById(obs.trap_id):null;populateObservationParcelSelect(trap?.parcel_id||singleSelected(parcelFilterState),obs?.trap_id||singleSelected(trapFilterState));$("observationDate").value=obs?.observed_on||todayISO();$("observationTotal").value=obs?.total_captured??"";$("observationComment").value=obs?.comment||"";renderObservationSpeciesRows(obs?detailsForObservation(obs.id):[]);setMessage($("observationMessage"));$("observationDialog").showModal();}
 async function saveObservation(event){event.preventDefault();const existing=data.observations.find(o=>o.id===$("observationId").value);const campaign=campaignById($("observationCampaign").value);const total=Number($("observationTotal").value);if(!campaign||!$("observationTrap").value||!Number.isInteger(total)||total<0)return setMessage($("observationMessage"),"Renseigne correctement la campagne, le piège, la date et le total.",true);const detailRows=[...$("aphidSpeciesRows").querySelectorAll(".species-detail-row")].map(row=>({species_id:row.dataset.speciesId,males:Number(row.querySelector(".male-input").value||0),females:Number(row.querySelector(".female-input").value||0),undetermined:Number(row.querySelector(".undetermined-input").value||0)}));const identified=detailRows.reduce((s,d)=>s+d.males+d.females+d.undetermined,0);if(campaign.protocol_type==="aphid"&&identified>total)return setMessage($("observationMessage"),`Impossible : ${identified} individus sont identifiés alors que le total capturé est ${total}.`,true);const status=campaign.protocol_type!=="aphid"?"not_applicable":identified===0?"not_started":identified<total?"partial":"complete";const payload={id:existing?.id||uuid(),campaign_id:campaign.id,trap_id:$("observationTrap").value,observed_on:$("observationDate").value,total_captured:total,identification_status:status,comment:$("observationComment").value.trim()||null,legacy_source_id:existing?.legacy_source_id||null,archived_at:existing?.archived_at||null,created_by:existing?.created_by||currentUser.id,created_at:existing?.created_at||new Date().toISOString(),updated_at:new Date().toISOString()};try{await writeRecord(TABLES.observations,payload);if(campaign.protocol_type==="aphid"){for(const d of detailRows){const old=data.details.find(x=>x.observation_id===payload.id&&x.species_id===d.species_id);await writeRecord(TABLES.details,{id:old?.id||uuid(),observation_id:payload.id,species_id:d.species_id,males:d.males,females:d.females,undetermined:d.undetermined,created_at:old?.created_at||new Date().toISOString(),updated_at:new Date().toISOString()});}}setMessage($("observationMessage"),navigator.onLine?"Relevé enregistré.":"Relevé enregistré hors connexion. Il sera synchronisé automatiquement.");$("campaignFilter").value=campaign.id;populateParcelFilter();renderAll();}catch(error){setMessage($("observationMessage"),error.message||"Enregistrement impossible.",true);}}
 
 // -----------------------------------------------------------------------------
@@ -1944,8 +2092,59 @@ async function saveIntervention(event){event.preventDefault();const id=uuid();co
 // -----------------------------------------------------------------------------
 // Espèces
 // -----------------------------------------------------------------------------
-function openSpeciesDialog(){renderSpeciesList();setMessage($("speciesMessage"));$("speciesDialog").showModal();}
-async function saveSpecies(event){event.preventDefault();const scientific=$("speciesScientific").value.trim();const common=$("speciesCommon").value.trim();if(!scientific)return;const existing=data.species.find(s=>s.code===slugify(scientific));if(existing)return setMessage($("speciesMessage"),"Cette espèce existe déjà.",true);const payload={id:uuid(),code:slugify(scientific),scientific_name:scientific,common_name:common||null,active:true,created_by:currentUser.id,created_at:new Date().toISOString(),updated_at:new Date().toISOString()};try{await writeRecord(TABLES.species,payload);$("speciesForm").reset();setMessage($("speciesMessage"),"Espèce ajoutée.");renderAll();renderSpeciesList();}catch(error){setMessage($("speciesMessage"),error.message||"Enregistrement impossible.",true);}}
+function openSpeciesDialog(){resetSpeciesForm();renderSpeciesList();setMessage($("speciesMessage"));$("speciesDialog").showModal();}
+
+function resetSpeciesForm(){
+  $("speciesForm").reset();
+  $("speciesId").value="";
+  $("speciesSubmitButton").textContent="Ajouter l'espèce";
+  $("speciesCancelEditButton").classList.add("hidden");
+  setMessage($("speciesMessage"));
+}
+
+// Pré-remplit le formulaire pour modifier une espèce existante
+// (nom scientifique / nom commun) sans changer son historique.
+function openSpeciesEditForm(species){
+  $("speciesId").value=species.id;
+  $("speciesScientific").value=species.scientific_name;
+  $("speciesCommon").value=species.common_name||"";
+  $("speciesSubmitButton").textContent="Enregistrer les modifications";
+  $("speciesCancelEditButton").classList.remove("hidden");
+  setMessage($("speciesMessage"));
+  $("speciesScientific").focus();
+}
+
+async function saveSpecies(event){
+  event.preventDefault();
+  const scientific=$("speciesScientific").value.trim();
+  const common=$("speciesCommon").value.trim();
+  if(!scientific)return;
+  const editingId=$("speciesId").value||null;
+  const existingRecord=editingId?speciesById(editingId):null;
+  const code=slugify(scientific);
+  const duplicate=data.species.find(s=>s.code===code&&s.id!==editingId);
+  if(duplicate)return setMessage($("speciesMessage"),"Cette espèce existe déjà.",true);
+  const payload={
+    id:existingRecord?.id||uuid(),
+    code,
+    scientific_name:scientific,
+    common_name:common||null,
+    active:existingRecord?.active??true,
+    archived_at:existingRecord?.archived_at||null,
+    created_by:existingRecord?.created_by||currentUser.id,
+    created_at:existingRecord?.created_at||new Date().toISOString(),
+    updated_at:new Date().toISOString()
+  };
+  try{
+    await writeRecord(TABLES.species,payload);
+    resetSpeciesForm();
+    setMessage($("speciesMessage"),editingId?"Espèce modifiée.":"Espèce ajoutée.");
+    renderAll();
+    renderSpeciesList();
+  }catch(error){
+    setMessage($("speciesMessage"),error.message||"Enregistrement impossible.",true);
+  }
+}
 
 // -----------------------------------------------------------------------------
 // Export Excel — structure proche du classeur de Bertrand
@@ -1999,7 +2198,11 @@ function initPWA(){const card=$("installCard");if(isStandalone())localStorage.se
 // -----------------------------------------------------------------------------
 function bind() {
   $("loginForm").addEventListener("submit",login);$("logoutButton").addEventListener("click",logout);$("authToggleButton").addEventListener("click",toggleMobileAuthCard);$("installButton").addEventListener("click",installApp);
-  $("campaignFilter").addEventListener("change",()=>{populateParcelFilter();populateAdminSelects();renderDashboard();});$("parcelFilter").addEventListener("change",()=>{populateTrapFilter();renderDashboard();});$("trapFilter").addEventListener("change",renderDashboard);$("speciesFilter").addEventListener("change",populateSpeciesFilter);$("sexFilter").addEventListener("change",renderDashboard);$("unitFilter").addEventListener("change",renderDashboard);$("processingFilter").addEventListener("change",renderDashboard);$("exportExcelButton").addEventListener("click",exportExcel);$("exportSvgButton").addEventListener("click",exportChartSvg);$("observationExcelFile").addEventListener("change",event=>analyzeObservationExcel(event.target.files?.[0]));$("cancelExcelImportButton").addEventListener("click",resetExcelImport);$("confirmExcelImportButton").addEventListener("click",confirmObservationExcelImport);
+  $("campaignFilter").addEventListener("change",()=>{populateParcelFilter();populateAdminSelects();renderDashboard();});$("unitFilter").addEventListener("change",renderDashboard);$("processingFilter").addEventListener("change",renderDashboard);$("exportExcelButton").addEventListener("click",exportExcel);$("exportSvgButton").addEventListener("click",exportChartSvg);$("observationExcelFile").addEventListener("change",event=>analyzeObservationExcel(event.target.files?.[0]));$("cancelExcelImportButton").addEventListener("click",resetExcelImport);$("confirmExcelImportButton").addEventListener("click",confirmObservationExcelImport);
+  ["parcel","trap","species","sex"].forEach(wireDropdownToggle);
+  document.addEventListener("click",closeAllFilterPanels);
+  document.addEventListener("keydown",event=>{if(event.key==="Escape")closeAllFilterPanels();});
+  $("speciesCancelEditButton").addEventListener("click",resetSpeciesForm);
   $("newCampaignButton").addEventListener("click",()=>openCampaignDialog());$("newParcelButton").addEventListener("click",()=>openParcelDialog());$("newTrapButton").addEventListener("click",()=>openTrapDialog());$("newObservationButton").addEventListener("click",()=>openObservationDialog());$("newInterventionButton").addEventListener("click",openInterventionDialog);$("speciesButton").addEventListener("click",openSpeciesDialog);$("archivesButton").addEventListener("click",openArchivesDialog);
   $("campaignForm").addEventListener("submit",saveCampaign);$("parcelForm").addEventListener("submit",saveParcel);$("trapForm").addEventListener("submit",saveTrap);$("trapEventForm").addEventListener("submit",saveTrapEvent);$("observationForm").addEventListener("submit",saveObservation);$("interventionForm").addEventListener("submit",saveIntervention);$("speciesForm").addEventListener("submit",saveSpecies);
   $("campaignProtocol").addEventListener("change",toggleCampaignSpeciesSection);$("trapCampaign").addEventListener("change",populateTrapParcelSelect);$("observationCampaign").addEventListener("change",()=>{populateObservationParcelSelect();resetExcelImport();});$("observationParcel").addEventListener("change",()=>{populateObservationTrapSelect();resetExcelImport();});$("observationTrap").addEventListener("change",resetExcelImport);$("observationTotal").addEventListener("input",updateIdentificationSummary);$("aphidSpeciesRows").addEventListener("input",updateIdentificationSummary);$("interventionCampaign").addEventListener("change",()=>renderInterventionParcelChoices($("interventionCampaign").value,[]));
