@@ -51,10 +51,11 @@ const data = {
 // Par défaut, tout est coché (équivalent à l'ancien "Tous" / "Toutes").
 const parcelFilterState = new Set();
 const trapFilterState = new Set();
-const speciesFilterState = new Set(["total"]);
-const sexFilterState = new Set(["all"]);
+// Pas de valeur sentinelle "total" / "tous" : cocher toutes les options
+// réelles équivaut déjà au total, donc on ne propose pas de case en plus.
+const speciesFilterState = new Set();
+const sexFilterState = new Set();
 const SEX_FILTER_OPTIONS = [
-  { value: "all", label: "Tous" },
   { value: "male", label: "Mâles" },
   { value: "female", label: "Femelles" },
   { value: "undetermined", label: "Indéterminés" }
@@ -569,28 +570,29 @@ function populateTrapFilter() {
 
 function populateSpeciesFilter() {
   const campaign = campaignById($("campaignFilter").value);
-  const options = [{ value: "total", label: "Total des captures" }];
+  const advanced = campaign?.protocol_type === "aphid";
 
-  if (campaign?.protocol_type === "aphid") {
-    campaignSpecies(campaign.id).forEach(s => options.push({ value: s.id, label: s.scientific_name }));
-  }
+  // Pas de case "Total des captures" : cocher toutes les espèces revient
+  // déjà au total, donc la liste ne contient que les espèces réelles.
+  const options = advanced ? campaignSpecies(campaign.id).map(s => ({ value: s.id, label: s.scientific_name })) : [];
 
   const availableValues = options.map(o => o.value);
   const kept = [...speciesFilterState].filter(v => availableValues.includes(v));
   speciesFilterState.clear();
-  (kept.length ? kept : ["total"]).forEach(v => speciesFilterState.add(v));
+  (kept.length ? kept : availableValues).forEach(v => speciesFilterState.add(v));
 
+  $("speciesFilterToggle").disabled = !advanced;
   refreshMultiFilter("species", options, speciesFilterState, "Total des captures", () => {
     renderDashboard();
   });
 
-  // Le protocole avancé permet de filtrer M / F / indéterminés,
-  // y compris lorsque "Total des captures" est sélectionné.
-  const advanced = campaign?.protocol_type === "aphid";
+  // Le protocole avancé permet de filtrer M / F / indéterminés.
+  // En protocole simple, il n'y a pas d'identification : le filtre est
+  // désactivé et reste sur "tout coché" (équivalent à l'ancien "Tous").
   $("sexFilterToggle").disabled = !advanced;
-  if (!advanced) {
+  if (!advanced || sexFilterState.size === 0) {
     sexFilterState.clear();
-    sexFilterState.add("all");
+    SEX_FILTER_OPTIONS.forEach(o => sexFilterState.add(o.value));
   }
   refreshMultiFilter("sex", SEX_FILTER_OPTIONS, sexFilterState, "Tous", () => {
     renderDashboard();
@@ -667,8 +669,13 @@ function identifiedTotal(obsId) {
 // combinés en une somme : plusieurs espèces et/ou plusieurs catégories
 // de sexe peuvent être affichées ensemble sur la même courbe.
 function observationValue(obs) {
-  const useTotal = speciesFilterState.has("total") || speciesFilterState.size === 0;
-  const useAllSex = sexFilterState.has("all") || sexFilterState.size === 0;
+  const campaign = campaignById($("campaignFilter").value);
+  const advanced = campaign?.protocol_type === "aphid";
+  const speciesOptions = advanced ? campaignSpecies(campaign.id) : [];
+  // "Toutes les espèces cochées" équivaut au total (comme l'ancienne case
+  // "Total des captures", qui n'existe plus en tant qu'option séparée).
+  const useTotal = !advanced || speciesOptions.length === 0 || speciesOptions.every(s => speciesFilterState.has(s.id));
+  const useAllSex = SEX_FILTER_OPTIONS.every(o => sexFilterState.has(o.value));
 
   if (useTotal) {
     if (useAllSex) return Number(obs.total_captured || 0);
@@ -860,16 +867,29 @@ function renderMetrics() {
 }
 
 function speciesFilterLabel() {
-  if (speciesFilterState.has("total") || speciesFilterState.size === 0) return "Total des captures";
-  const names = [...speciesFilterState].map(id => speciesById(id)?.scientific_name).filter(Boolean);
-  if (!names.length) return "Espèce";
-  return names.length <= 2 ? names.join(" + ") : `${names.slice(0, 2).join(" + ")} +${names.length - 2}`;
+  const campaign = campaignById($("campaignFilter").value);
+  const advanced = campaign?.protocol_type === "aphid";
+  if (!advanced) return "Total des captures";
+  const options = campaignSpecies(campaign.id);
+  if (!options.length) return "Total des captures";
+  if (speciesFilterState.size === 0) return "Aucune espèce sélectionnée";
+  // Toutes les espèces cochées = équivalent de l'ancienne case "Total des
+  // captures" : le titre doit rester logique et l'annoncer comme tel.
+  if (options.every(s => speciesFilterState.has(s.id))) return "Total des captures";
+  // Sinon, on liste TOUTES les espèces cochées, sans jamais tronquer en "+N".
+  const names = options.filter(s => speciesFilterState.has(s.id)).map(s => s.scientific_name);
+  return names.length ? names.join(" + ") : "Aucune espèce sélectionnée";
 }
 
 function sexFilterLabel() {
-  if (sexFilterState.has("all") || sexFilterState.size === 0) return "";
+  const campaign = campaignById($("campaignFilter").value);
+  const advanced = campaign?.protocol_type === "aphid";
+  if (!advanced) return "";
+  if (sexFilterState.size === 0) return " — aucun sexe sélectionné";
+  // Tous les sexes cochés revient à ne préciser aucun filtre de sexe.
+  if (SEX_FILTER_OPTIONS.every(o => sexFilterState.has(o.value))) return "";
   const labelMap = { male: "Mâles", female: "Femelles", undetermined: "Indéterminés" };
-  const labels = [...sexFilterState].map(v => labelMap[v]).filter(Boolean);
+  const labels = SEX_FILTER_OPTIONS.filter(o => sexFilterState.has(o.value)).map(o => labelMap[o.value]);
   return labels.length ? ` — ${labels.join(" + ")}` : "";
 }
 
