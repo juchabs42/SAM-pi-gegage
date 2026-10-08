@@ -345,3 +345,4 @@ footer{display:flex;justify-content:space-between;gap:20px;padding:24px clamp(18
 .trap-pin.selected .pin-dot{outline:3px solid #ffd400}
 .map-popup strong{display:block}.map-popup span{display:block;color:var(--muted);font-size:.8rem}
 @media(max-width:720px){.view-tabs{width:100%}.view-tab{flex:1}.trap-map{height:60vh}}
+.map-popup .small-button{margin-top:8px}.map-popup-hint{margin-top:6px;font-style:italic}

@@ -2291,8 +2291,10 @@ function trapPopupHtml(trap) {
   const parcel = parcelById(trap.parcel_id);
   const last = activeRows(data.observations).filter(o => o.trap_id === trap.id).sort((a, b) => b.observed_on.localeCompare(a.observed_on))[0];
   return `<div class="map-popup"><strong>${escapeHtml(trap.code)}</strong>` +
-    `<span>${escapeHtml(parcel ? parcelLabel(parcel, { compact: true }) : "—")}</span>` +
-    `<span>${last ? `Dernier relevé : ${escapeHtml(fmtDate(last.observed_on))} — ${Number(last.total_captured || 0)} capture(s)` : "Aucun relevé"}</span></div>`;
+    `<span>${escapeHtml(parcel ? parcelLabel(parcel) : "—")}</span>` +
+    `<span>${last ? `Dernier relevé : ${escapeHtml(fmtDate(last.observed_on))} — ${Number(last.total_captured || 0)} capture(s)` : "Aucun relevé"}</span>` +
+    (currentUser ? `<span class="map-popup-hint">Glisse le point pour le déplacer.</span><button type="button" class="small-button danger" data-map-remove="${escapeHtml(trap.id)}">Retirer la position</button>` : "") +
+    `</div>`;
 }
 
 function renderMap() {
@@ -2311,10 +2313,19 @@ function renderMap() {
 
   // Sélecteur de piège à placer (administrateur)
   const select = $("mapTrapSelect");
-  if (!traps.some(t => t.id === mapSelectedTrapId)) mapSelectedTrapId = traps[0]?.id || "";
+  // Seuls les pièges pas encore placés sont proposés ; un piège déjà placé
+  // se modifie directement sur la carte (glisser le point / bouton du popup).
+  const unplaced = traps.filter(t => !hasPosition(t));
+  if (!unplaced.some(t => t.id === mapSelectedTrapId)) mapSelectedTrapId = unplaced[0]?.id || "";
   select.innerHTML = "";
-  traps.forEach(t => select.add(new Option(`${t.code}${hasPosition(t) ? " ✓" : " — non placé"}`, t.id)));
+  unplaced.forEach(t => select.add(new Option(`${t.code} — ${parcelLabel(parcelById(t.parcel_id))}`, t.id)));
+  if (!unplaced.length) select.add(new Option("Tous les pièges sont placés", ""));
   select.value = mapSelectedTrapId;
+  select.disabled = !unplaced.length;
+  $("mapGpsButton").disabled = !unplaced.length;
+  $("mapHint").textContent = unplaced.length
+    ? "Choisis un piège à placer, puis clique sur la carte (ou utilise ta position GPS). Pour corriger un piège déjà placé, glisse son point sur la carte."
+    : "Tous les pièges de cette sélection sont placés. Glisse un point pour le corriger, ou clique dessus pour le retirer.";
 
   // Couleur par parcelle
   const parcelIds = [...new Set(traps.map(t => t.parcel_id))];
@@ -2324,11 +2335,13 @@ function renderMap() {
   trapMapMarkers.clear();
   placed.forEach(trap => {
     const html = `<span class="pin-dot" style="background:${colorOf(trap.parcel_id)}"></span><span class="pin-label">${escapeHtml(trap.code)}</span>`;
-    const icon = L.divIcon({ className: `trap-pin${trap.id === mapSelectedTrapId && isAdmin ? " selected" : ""}`, html, iconSize: [18, 18], iconAnchor: [9, 9] });
+    const icon = L.divIcon({ className: "trap-pin", html, iconSize: [18, 18], iconAnchor: [9, 9] });
     const marker = L.marker([Number(trap.latitude), Number(trap.longitude)], { icon, draggable: isAdmin, title: trap.code });
     marker.bindPopup(trapPopupHtml(trap));
     marker.on("dragend", () => { const p = marker.getLatLng(); saveTrapPosition(trap, p.lat, p.lng); });
-    marker.on("click", () => { if (isAdmin) { mapSelectedTrapId = trap.id; select.value = trap.id; } });
+    marker.on("popupopen", event => {
+      event.popup.getElement()?.querySelector("[data-map-remove]")?.addEventListener("click", () => { marker.closePopup(); saveTrapPosition(trap, null, null); });
+    });
     marker.addTo(trapMapLayer);
     trapMapMarkers.set(trap.id, marker);
   });
@@ -2359,6 +2372,7 @@ async function saveTrapPosition(trap, lat, lng) {
 
 function placeSelectedTrap(lat, lng) {
   if (!currentUser) return;
+  if (!mapSelectedTrapId) return; // tous les pièges sont déjà placés : le clic ne fait rien
   const trap = trapById(mapSelectedTrapId);
   if (!trap) return setMessage($("mapMessage"), "Choisis d’abord un piège à placer.", true);
   saveTrapPosition(trap, lat, lng);
@@ -2376,11 +2390,6 @@ function placeTrapWithGps() {
   );
 }
 
-function clearSelectedTrapPosition() {
-  const trap = trapById(mapSelectedTrapId);
-  if (trap && hasPosition(trap)) saveTrapPosition(trap, null, null);
-}
-
 // -----------------------------------------------------------------------------
 // Événements UI
 // -----------------------------------------------------------------------------
@@ -2391,7 +2400,6 @@ function bind() {
   document.querySelectorAll(".view-tab").forEach(btn => btn.addEventListener("click", () => setView(btn.dataset.view)));
   $("mapTrapSelect").addEventListener("change", () => { mapSelectedTrapId = $("mapTrapSelect").value; renderMap(); });
   $("mapGpsButton").addEventListener("click", placeTrapWithGps);
-  $("mapClearButton").addEventListener("click", clearSelectedTrapPosition);
   document.addEventListener("click",closeAllFilterPanels);
   document.addEventListener("keydown",event=>{if(event.key==="Escape")closeAllFilterPanels();});
   $("speciesCancelEditButton").addEventListener("click",resetSpeciesForm);
