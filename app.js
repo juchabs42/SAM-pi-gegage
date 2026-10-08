@@ -2241,6 +2241,7 @@ let trapMap = null;
 let trapMapLayer = null;
 let trapMapFitKey = null;
 let mapSelectedTrapId = "";
+let mapEditTrapId = ""; // piège dont l'emplacement est en cours de modification
 const trapMapMarkers = new Map();
 const MAP_COLORS = ["#d31145", "#ffb703", "#3ad1ff", "#7CFC00", "#ff7bd5", "#ff8c42", "#b388ff", "#ffffff"];
 
@@ -2293,14 +2294,15 @@ function trapPopupHtml(trap) {
   return `<div class="map-popup"><strong>${escapeHtml(trap.code)}</strong>` +
     `<span>${escapeHtml(parcel ? parcelLabel(parcel) : "—")}</span>` +
     `<span>${last ? `Dernier relevé : ${escapeHtml(fmtDate(last.observed_on))} — ${Number(last.total_captured || 0)} capture(s)` : "Aucun relevé"}</span>` +
-    (currentUser ? `<span class="map-popup-hint">Glisse le point pour le déplacer.</span><button type="button" class="small-button danger" data-map-remove="${escapeHtml(trap.id)}">Retirer la position</button>` : "") +
+    (currentUser ? (trap.id === mapEditTrapId
+      ? `<span class="map-popup-hint">Glisse le point pour le déplacer.</span><button type="button" class="small-button danger" data-map-remove>Retirer la position</button><button type="button" class="small-button" data-map-done>Terminer</button>`
+      : `<button type="button" class="small-button" data-map-edit>Modifier l’emplacement</button>`) : "") +
     `</div>`;
 }
 
 function renderMap() {
   if (!$("mapSection") || $("mapSection").classList.contains("hidden")) return;
   const isAdmin = Boolean(currentUser);
-  $("mapAdminTools").classList.toggle("hidden", !isAdmin);
   if (!ensureTrapMap()) {
     $("mapMessage").textContent = "Carte indisponible (bibliothèque Leaflet non chargée : connexion Internet requise).";
     $("mapMessage").classList.add("error");
@@ -2323,9 +2325,10 @@ function renderMap() {
   select.value = mapSelectedTrapId;
   select.disabled = !unplaced.length;
   $("mapGpsButton").disabled = !unplaced.length;
-  $("mapHint").textContent = unplaced.length
-    ? "Choisis un piège à placer, puis clique sur la carte (ou utilise ta position GPS). Pour corriger un piège déjà placé, glisse son point sur la carte."
-    : "Tous les pièges de cette sélection sont placés. Glisse un point pour le corriger, ou clique dessus pour le retirer.";
+  // L'encart n'apparaît que s'il reste des pièges à placer.
+  $("mapAdminTools").classList.toggle("hidden", !isAdmin || !unplaced.length);
+  $("mapHint").textContent = "Choisis un piège à placer, puis clique sur la carte (ou utilise ta position GPS). Pour corriger un piège déjà placé, clique sur son point puis « Modifier l’emplacement ».";
+  if (!placed.some(t => t.id === mapEditTrapId)) mapEditTrapId = "";
 
   // Couleur par parcelle
   const parcelIds = [...new Set(traps.map(t => t.parcel_id))];
@@ -2336,11 +2339,17 @@ function renderMap() {
   placed.forEach(trap => {
     const html = `<span class="pin-dot" style="background:${colorOf(trap.parcel_id)}"></span><span class="pin-label">${escapeHtml(trap.code)}</span>`;
     const icon = L.divIcon({ className: "trap-pin", html, iconSize: [18, 18], iconAnchor: [9, 9] });
-    const marker = L.marker([Number(trap.latitude), Number(trap.longitude)], { icon, draggable: isAdmin, title: trap.code });
+    const marker = L.marker([Number(trap.latitude), Number(trap.longitude)], { icon, draggable: isAdmin && trap.id === mapEditTrapId, title: trap.code });
     marker.bindPopup(trapPopupHtml(trap));
-    marker.on("dragend", () => { const p = marker.getLatLng(); saveTrapPosition(trap, p.lat, p.lng); });
+    marker.on("dragend", () => { const p = marker.getLatLng(); mapEditTrapId = ""; saveTrapPosition(trap, p.lat, p.lng); });
     marker.on("popupopen", event => {
-      event.popup.getElement()?.querySelector("[data-map-remove]")?.addEventListener("click", () => { marker.closePopup(); saveTrapPosition(trap, null, null); });
+      const el = event.popup.getElement();
+      el?.querySelector("[data-map-edit]")?.addEventListener("click", () => {
+        mapEditTrapId = trap.id; renderMap();
+        trapMapMarkers.get(trap.id)?.openPopup();
+      });
+      el?.querySelector("[data-map-done]")?.addEventListener("click", () => { mapEditTrapId = ""; renderMap(); });
+      el?.querySelector("[data-map-remove]")?.addEventListener("click", () => { mapEditTrapId = ""; marker.closePopup(); saveTrapPosition(trap, null, null); });
     });
     marker.addTo(trapMapLayer);
     trapMapMarkers.set(trap.id, marker);
