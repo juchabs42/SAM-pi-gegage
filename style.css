@@ -326,3 +326,22 @@ footer{display:flex;justify-content:space-between;gap:20px;padding:24px clamp(18
     grid-template-columns: 1fr;
   }
 }
+
+/* =========================================================
+   Onglets Suivi / Carte + carte satellite des pièges
+   ========================================================= */
+.view-tabs{display:flex;gap:6px;margin:0 0 14px;padding:4px;border:1px solid var(--line);border-radius:12px;background:#fff;width:max-content;max-width:100%}
+.view-tab{min-height:38px;padding:0 20px;border:0;border-radius:9px;background:transparent;color:var(--muted);font-weight:800}
+.view-tab:hover{color:var(--brand)}
+.view-tab.active{background:var(--brand);color:#fff}
+.trap-map{width:100%;height:min(62vh,560px);min-height:360px;border-radius:12px;border:1px solid var(--line);overflow:hidden;z-index:1}
+.map-tools{display:flex;flex-wrap:wrap;gap:10px;align-items:end;margin-bottom:12px;padding:12px;border:1px solid var(--line);border-radius:12px;background:#fafbfc}
+.map-tools label{display:grid;gap:6px;flex:1 1 220px;min-width:0;color:var(--muted);font-size:.8rem;font-weight:750}
+.map-tools .secondary-button{flex:0 1 auto}
+.map-hint{flex:1 1 100%;margin:0;color:var(--muted);font-size:.8rem}
+.trap-pin{background:none;border:0}
+.trap-pin .pin-dot{display:block;width:18px;height:18px;border:3px solid #fff;border-radius:50%;box-shadow:0 1px 5px rgba(0,0,0,.55)}
+.trap-pin .pin-label{position:absolute;left:50%;top:20px;transform:translateX(-50%);padding:1px 6px;border-radius:6px;background:rgba(255,255,255,.92);color:var(--ink);font-size:.7rem;font-weight:800;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+.trap-pin.selected .pin-dot{outline:3px solid #ffd400}
+.map-popup strong{display:block}.map-popup span{display:block;color:var(--muted);font-size:.8rem}
+@media(max-width:720px){.view-tabs{width:100%}.view-tab{flex:1}.trap-map{height:60vh}}

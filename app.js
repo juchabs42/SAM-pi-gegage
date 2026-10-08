@@ -397,6 +397,7 @@ function renderAuth() {
   $("adminActions").classList.toggle("hidden", !connected);
   $("connectedEmail").textContent = currentUser?.email || "";
   if (!connected) $("loginPassword").value = "";
+  if (typeof renderMap === "function") renderMap();
 }
 
 async function login(event) {
@@ -860,6 +861,7 @@ function renderDashboard() {
   renderMetrics();
   renderChart();
   renderHistory();
+  renderMap();
 }
 
 function renderMetrics() {
@@ -1518,7 +1520,7 @@ async function saveParcel(event) {
 // Pièges et événements
 // -----------------------------------------------------------------------------
 function openTrapDialog(trap=null){$("trapForm").reset();populateAdminSelects();$("trapId").value=trap?.id||"";$("trapCampaign").value=trap?.campaign_id||$("campaignFilter").value;populateTrapParcelSelect();$("trapParcel").value=trap?.parcel_id||"";$("trapCode").value=trap?.code||"";$("trapType").value=trap?.trap_type||"";$("trapRow").value=trap?.row_ref||"";$("trapPosition").value=trap?.position||"";$("trapInstalled").value=trap?.installed_on||todayISO();$("trapAttractant").value=trap?.attractant||"";$("trapComment").value=trap?.comment||"";setMessage($("trapMessage"));renderTrapList();$("trapDialog").showModal();}
-async function saveTrap(event){event.preventDefault();const existing=data.traps.find(t=>t.id===$("trapId").value);const payload={id:existing?.id||uuid(),campaign_id:$("trapCampaign").value,parcel_id:$("trapParcel").value,code:$("trapCode").value.trim(),trap_type:$("trapType").value.trim()||null,row_ref:$("trapRow").value.trim()||null,position:$("trapPosition").value.trim()||null,installed_on:$("trapInstalled").value||null,removed_on:existing?.removed_on||null,attractant:$("trapAttractant").value.trim()||null,comment:$("trapComment").value.trim()||null,archived_at:existing?.archived_at||null,created_by:existing?.created_by||currentUser.id,created_at:existing?.created_at||new Date().toISOString(),updated_at:new Date().toISOString()};try{await writeRecord(TABLES.traps,payload);let link=data.campaignParcels.find(l=>l.campaign_id===payload.campaign_id&&l.parcel_id===payload.parcel_id);if(!link)await writeRecord(TABLES.campaignParcels,{id:uuid(),campaign_id:payload.campaign_id,parcel_id:payload.parcel_id,modality:null,created_at:new Date().toISOString()});if(!existing&&payload.installed_on)await writeRecord(TABLES.trapEvents,{id:uuid(),trap_id:payload.id,event_date:payload.installed_on,event_type:"installation",label:"Installation du piège",comment:payload.comment,archived_at:null,created_by:currentUser.id,created_at:new Date().toISOString(),updated_at:new Date().toISOString()});setMessage($("trapMessage"),navigator.onLine?"Piège enregistré.":"Piège enregistré hors connexion.");renderAll();renderTrapList();}catch(error){setMessage($("trapMessage"),error.message||"Enregistrement impossible.",true);}}
+async function saveTrap(event){event.preventDefault();const existing=data.traps.find(t=>t.id===$("trapId").value);const payload={id:existing?.id||uuid(),campaign_id:$("trapCampaign").value,parcel_id:$("trapParcel").value,code:$("trapCode").value.trim(),trap_type:$("trapType").value.trim()||null,row_ref:$("trapRow").value.trim()||null,position:$("trapPosition").value.trim()||null,installed_on:$("trapInstalled").value||null,removed_on:existing?.removed_on||null,attractant:$("trapAttractant").value.trim()||null,comment:$("trapComment").value.trim()||null,archived_at:existing?.archived_at||null,created_by:existing?.created_by||currentUser.id,created_at:existing?.created_at||new Date().toISOString(),updated_at:new Date().toISOString()};if(existing&&existing.latitude!=null&&existing.longitude!=null){payload.latitude=existing.latitude;payload.longitude=existing.longitude;}try{await writeRecord(TABLES.traps,payload);let link=data.campaignParcels.find(l=>l.campaign_id===payload.campaign_id&&l.parcel_id===payload.parcel_id);if(!link)await writeRecord(TABLES.campaignParcels,{id:uuid(),campaign_id:payload.campaign_id,parcel_id:payload.parcel_id,modality:null,created_at:new Date().toISOString()});if(!existing&&payload.installed_on)await writeRecord(TABLES.trapEvents,{id:uuid(),trap_id:payload.id,event_date:payload.installed_on,event_type:"installation",label:"Installation du piège",comment:payload.comment,archived_at:null,created_by:currentUser.id,created_at:new Date().toISOString(),updated_at:new Date().toISOString()});setMessage($("trapMessage"),navigator.onLine?"Piège enregistré.":"Piège enregistré hors connexion.");renderAll();renderTrapList();}catch(error){setMessage($("trapMessage"),error.message||"Enregistrement impossible.",true);}}
 function openTrapEventDialog(trap=null){populateEventTrapSelect();if(trap)$("eventTrap").value=trap.id;$("eventDate").value=todayISO();$("eventType").value="replacement";$("eventLabel").value="";$("eventComment").value="";setMessage($("eventMessage"));$("trapEventDialog").showModal();}
 async function saveTrapEvent(event){event.preventDefault();const payload={id:uuid(),trap_id:$("eventTrap").value,event_date:$("eventDate").value,event_type:$("eventType").value,label:$("eventLabel").value.trim()||null,comment:$("eventComment").value.trim()||null,archived_at:null,created_by:currentUser.id,created_at:new Date().toISOString(),updated_at:new Date().toISOString()};try{await writeRecord(TABLES.trapEvents,payload);if(payload.event_type==="replacement"){const trap=trapById(payload.trap_id);if(trap)await writeRecord(TABLES.traps,{...trap,installed_on:payload.event_date,updated_at:new Date().toISOString()});}setMessage($("eventMessage"),navigator.onLine?"Événement enregistré.":"Événement enregistré hors connexion.");renderAll();}catch(error){setMessage($("eventMessage"),error.message||"Enregistrement impossible.",true);}}
 
@@ -2231,6 +2233,154 @@ function showInstallMessage(message){$("installMessage").textContent=message;$("
 async function installApp(){if(deferredInstallPrompt){deferredInstallPrompt.prompt();const result=await deferredInstallPrompt.userChoice;deferredInstallPrompt=null;if(result.outcome==="accepted"){localStorage.setItem(INSTALL_STORAGE_KEY,"1");$("installCard").classList.add("hidden");}return;}if(isIOS())showInstallMessage("Sur iPhone/iPad : dans Safari, touche Partager puis « Sur l’écran d’accueil ». ");else showInstallMessage("Utilise le menu du navigateur puis « Installer l’application » ou « Ajouter à l’écran d’accueil ». ");}
 function initPWA(){const card=$("installCard");if(isStandalone())localStorage.setItem(INSTALL_STORAGE_KEY,"1");card.classList.toggle("hidden",!isMobile()||isStandalone()||localStorage.getItem(INSTALL_STORAGE_KEY)==="1");addEventListener("beforeinstallprompt",e=>{e.preventDefault();deferredInstallPrompt=e;if(isMobile()&&!isStandalone())card.classList.remove("hidden");});addEventListener("appinstalled",()=>{localStorage.setItem(INSTALL_STORAGE_KEY,"1");card.classList.add("hidden");});if("serviceWorker"in navigator)addEventListener("load",()=>navigator.serviceWorker.register("./service-worker.js").catch(console.warn));}
 
+
+// -----------------------------------------------------------------------------
+// Onglet Carte (fond satellite) : position des pièges
+// -----------------------------------------------------------------------------
+let trapMap = null;
+let trapMapLayer = null;
+let trapMapFitKey = null;
+let mapSelectedTrapId = "";
+const trapMapMarkers = new Map();
+const MAP_COLORS = ["#d31145", "#ffb703", "#3ad1ff", "#7CFC00", "#ff7bd5", "#ff8c42", "#b388ff", "#ffffff"];
+
+function setView(view) {
+  const isMap = view === "carte";
+  document.querySelectorAll(".view-suivi").forEach(el => el.classList.toggle("hidden", isMap));
+  document.querySelectorAll(".view-carte").forEach(el => el.classList.toggle("hidden", !isMap));
+  document.querySelectorAll(".view-tab").forEach(btn => {
+    const active = btn.dataset.view === view;
+    btn.classList.toggle("active", active);
+    btn.setAttribute("aria-selected", String(active));
+  });
+  if (isMap) {
+    renderMap();
+    setTimeout(() => { trapMap?.invalidateSize(); }, 60);
+  } else {
+    setTimeout(() => { chart?.resize(); }, 60);
+  }
+}
+
+function ensureTrapMap() {
+  if (trapMap) return true;
+  if (typeof L === "undefined") return false;
+  trapMap = L.map("trapMap", { zoomControl: true }).setView([43.6, 3.3], 8);
+  const ign = L.tileLayer("https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&FORMAT=image/jpeg&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}", {
+    maxZoom: 19, attribution: "© IGN – Géoplateforme"
+  });
+  const esri = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+    maxZoom: 19, attribution: "Imagery © Esri, Maxar, Earthstar Geographics"
+  });
+  ign.addTo(trapMap);
+  L.control.layers({ "Satellite IGN (France)": ign, "Satellite Esri (monde)": esri }, null, { collapsed: true }).addTo(trapMap);
+  trapMapLayer = L.layerGroup().addTo(trapMap);
+  trapMap.on("click", event => placeSelectedTrap(event.latlng.lat, event.latlng.lng));
+  return true;
+}
+
+function mapTraps() {
+  const campaignId = $("campaignFilter").value;
+  return trapsForCampaign(campaignId).filter(t => parcelFilterState.has(t.parcel_id) && trapFilterState.has(t.id));
+}
+
+function hasPosition(trap) {
+  return trap.latitude != null && trap.longitude != null && Number.isFinite(Number(trap.latitude)) && Number.isFinite(Number(trap.longitude));
+}
+
+function trapPopupHtml(trap) {
+  const parcel = parcelById(trap.parcel_id);
+  const last = activeRows(data.observations).filter(o => o.trap_id === trap.id).sort((a, b) => b.observed_on.localeCompare(a.observed_on))[0];
+  return `<div class="map-popup"><strong>${escapeHtml(trap.code)}</strong>` +
+    `<span>${escapeHtml(parcel ? parcelLabel(parcel, { compact: true }) : "—")}</span>` +
+    `<span>${last ? `Dernier relevé : ${escapeHtml(fmtDate(last.observed_on))} — ${Number(last.total_captured || 0)} capture(s)` : "Aucun relevé"}</span></div>`;
+}
+
+function renderMap() {
+  if (!$("mapSection") || $("mapSection").classList.contains("hidden")) return;
+  const isAdmin = Boolean(currentUser);
+  $("mapAdminTools").classList.toggle("hidden", !isAdmin);
+  if (!ensureTrapMap()) {
+    $("mapMessage").textContent = "Carte indisponible (bibliothèque Leaflet non chargée : connexion Internet requise).";
+    $("mapMessage").classList.add("error");
+    return;
+  }
+  const traps = mapTraps();
+  const placed = traps.filter(hasPosition);
+  const campaign = campaignById($("campaignFilter").value);
+  $("mapSummary").textContent = campaign ? `${placed.length} / ${traps.length} piège(s) positionné(s)` : "";
+
+  // Sélecteur de piège à placer (administrateur)
+  const select = $("mapTrapSelect");
+  if (!traps.some(t => t.id === mapSelectedTrapId)) mapSelectedTrapId = traps[0]?.id || "";
+  select.innerHTML = "";
+  traps.forEach(t => select.add(new Option(`${t.code}${hasPosition(t) ? " ✓" : " — non placé"}`, t.id)));
+  select.value = mapSelectedTrapId;
+
+  // Couleur par parcelle
+  const parcelIds = [...new Set(traps.map(t => t.parcel_id))];
+  const colorOf = id => MAP_COLORS[parcelIds.indexOf(id) % MAP_COLORS.length];
+
+  trapMapLayer.clearLayers();
+  trapMapMarkers.clear();
+  placed.forEach(trap => {
+    const html = `<span class="pin-dot" style="background:${colorOf(trap.parcel_id)}"></span><span class="pin-label">${escapeHtml(trap.code)}</span>`;
+    const icon = L.divIcon({ className: `trap-pin${trap.id === mapSelectedTrapId && isAdmin ? " selected" : ""}`, html, iconSize: [18, 18], iconAnchor: [9, 9] });
+    const marker = L.marker([Number(trap.latitude), Number(trap.longitude)], { icon, draggable: isAdmin, title: trap.code });
+    marker.bindPopup(trapPopupHtml(trap));
+    marker.on("dragend", () => { const p = marker.getLatLng(); saveTrapPosition(trap, p.lat, p.lng); });
+    marker.on("click", () => { if (isAdmin) { mapSelectedTrapId = trap.id; select.value = trap.id; } });
+    marker.addTo(trapMapLayer);
+    trapMapMarkers.set(trap.id, marker);
+  });
+
+  $("mapEmpty").classList.toggle("hidden", placed.length > 0);
+
+  // On recadre seulement quand la campagne change (pas à chaque pose de piège).
+  const fitKey = campaign?.id || "";
+  if (fitKey !== trapMapFitKey) {
+    trapMapFitKey = fitKey;
+    if (placed.length) trapMap.fitBounds(L.latLngBounds(placed.map(t => [Number(t.latitude), Number(t.longitude)])).pad(0.3), { maxZoom: 18 });
+  }
+}
+
+async function saveTrapPosition(trap, lat, lng) {
+  if (!currentUser) return setMessage($("mapMessage"), "Connexion administrateur requise.", true);
+  const latitude = lat == null ? null : Math.round(lat * 1e6) / 1e6;
+  const longitude = lng == null ? null : Math.round(lng * 1e6) / 1e6;
+  try {
+    await writeRecord(TABLES.traps, { ...trap, latitude, longitude, updated_at: new Date().toISOString() });
+    setMessage($("mapMessage"), latitude == null ? `Position de ${trap.code} retirée.` : (navigator.onLine ? `${trap.code} positionné.` : `${trap.code} positionné hors connexion.`));
+  } catch (error) {
+    const missing = /latitude|longitude|column/i.test(error?.message || "");
+    setMessage($("mapMessage"), missing ? "Colonnes latitude/longitude absentes : exécute d’abord supabase_patch_carte.sql dans Supabase." : (error.message || "Enregistrement impossible."), true);
+  }
+  renderMap();
+}
+
+function placeSelectedTrap(lat, lng) {
+  if (!currentUser) return;
+  const trap = trapById(mapSelectedTrapId);
+  if (!trap) return setMessage($("mapMessage"), "Choisis d’abord un piège à placer.", true);
+  saveTrapPosition(trap, lat, lng);
+}
+
+function placeTrapWithGps() {
+  const trap = trapById(mapSelectedTrapId);
+  if (!trap) return setMessage($("mapMessage"), "Choisis d’abord un piège à placer.", true);
+  if (!navigator.geolocation) return setMessage($("mapMessage"), "Géolocalisation indisponible sur cet appareil.", true);
+  setMessage($("mapMessage"), "Recherche de la position GPS…");
+  navigator.geolocation.getCurrentPosition(
+    pos => { trapMap?.setView([pos.coords.latitude, pos.coords.longitude], 18); saveTrapPosition(trap, pos.coords.latitude, pos.coords.longitude); },
+    () => setMessage($("mapMessage"), "Position GPS impossible (autorisation refusée ou signal absent).", true),
+    { enableHighAccuracy: true, timeout: 20000 }
+  );
+}
+
+function clearSelectedTrapPosition() {
+  const trap = trapById(mapSelectedTrapId);
+  if (trap && hasPosition(trap)) saveTrapPosition(trap, null, null);
+}
+
 // -----------------------------------------------------------------------------
 // Événements UI
 // -----------------------------------------------------------------------------
@@ -2238,6 +2388,10 @@ function bind() {
   $("loginForm").addEventListener("submit",login);$("logoutButton").addEventListener("click",logout);$("authToggleButton").addEventListener("click",toggleMobileAuthCard);$("installButton").addEventListener("click",installApp);
   $("campaignFilter").addEventListener("change",()=>{populateParcelFilter();populateAdminSelects();renderDashboard();});$("unitFilter").addEventListener("change",renderDashboard);$("processingFilter").addEventListener("change",renderDashboard);$("exportExcelButton").addEventListener("click",exportExcel);$("exportSvgButton").addEventListener("click",exportChartSvg);$("observationExcelFile").addEventListener("change",event=>analyzeObservationExcel(event.target.files?.[0]));$("cancelExcelImportButton").addEventListener("click",resetExcelImport);$("confirmExcelImportButton").addEventListener("click",confirmObservationExcelImport);
   ["parcel","trap","species","sex"].forEach(wireDropdownToggle);
+  document.querySelectorAll(".view-tab").forEach(btn => btn.addEventListener("click", () => setView(btn.dataset.view)));
+  $("mapTrapSelect").addEventListener("change", () => { mapSelectedTrapId = $("mapTrapSelect").value; renderMap(); });
+  $("mapGpsButton").addEventListener("click", placeTrapWithGps);
+  $("mapClearButton").addEventListener("click", clearSelectedTrapPosition);
   document.addEventListener("click",closeAllFilterPanels);
   document.addEventListener("keydown",event=>{if(event.key==="Escape")closeAllFilterPanels();});
   $("speciesCancelEditButton").addEventListener("click",resetSpeciesForm);

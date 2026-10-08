@@ -1,9 +1,9 @@
-const CACHE_NAME = "sam-piegeage-v2-20260925-1";
+const CACHE_NAME = "sam-piegeage-v2-20261008-1";
 const CORE_ASSETS = [
   "./",
   "./index.html",
-  "./style.css?v=20260925-1",
-  "./app.js?v=20260925-1",
+  "./style.css?v=20261008-1",
+  "./app.js?v=20261008-1",
   "./config.js?v=20260918-3",
   "./site.webmanifest",
   "./favicon.ico",
@@ -19,7 +19,9 @@ const CORE_ASSETS = [
   "./bouton-connexion.png",
   "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2",
   "https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js",
-  "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"
+  "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js",
+  "https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js",
+  "https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css"
 ];
 
 self.addEventListener("install", event => {
